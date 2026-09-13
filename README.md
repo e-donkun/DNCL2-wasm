@@ -6,13 +6,16 @@ AssemblyScriptでWebAssemblyにコンパイルして、ブラウザのコンソ�
 
 ## 現在の状態
 
-設計フェーズはほぼ完了、実装は着手直後（`assembly/token.ts` のみ）です。
+実装・テスト・ビルド・HTML統合まで完了しています。
 
 - ✅ `DNCL_SPEC_SUMMARY.md` — 実装対象の文法を整理したリファレンス
 - ✅ `DESIGN.md` — 字句解析・構文解析・インタプリタ・WASM統合の設計（かなり詳細）
-- ✅ `assembly/token.ts` — トークン種別の定義
-- ⬜ lexer / parser / interpreter / index — 未実装（DESIGN.mdの疑似コードを元に実装する）
-- ⬜ ビルド・動作確認・HTML統合 — 未着手
+- ✅ `assembly/token.ts` / `lexer.ts` / `ast.ts` / `parser.ts` / `interpreter.ts` / `index.ts`
+- ✅ `tests/run.mjs` — Node.js単体テスト（DESIGN.md 8節のサンプル1〜6を含む11ケース、全パス）
+- ✅ `npx asc assembly/index.ts --target release` のビルド確認（debug/releaseとも）
+- ✅ `dist/index.html` — 単一HTMLファイル（外部fetchなし、コンソールUI付き）。
+  Playwright（ヘッドレスChromium）で実際に読み込み、サンプル実行・トークン一覧表示・
+  外部入力・論理演算子の左結合・エラー表示を確認済み
 
 ## セットアップ
 
@@ -20,20 +23,16 @@ AssemblyScriptでWebAssemblyにコンパイルして、ブラウザのコンソ�
 npm install
 ```
 
-## ビルド（実装が進んだら）
+## ビルド
 
 ```bash
 npm run build:debug   # build/dncl.debug.wasm
 npm run build         # build/dncl.wasm （最適化ビルド）
+npm test              # tests/run.mjs でDESIGN.md 8節のサンプルなどを検証
+npm run build:html    # build/dncl.wasm を埋め込んだ dist/index.html を生成
 ```
 
-## 続きの進め方
-
-1. `DESIGN.md` を読み、章立て通りに `assembly/lexer.ts` → `assembly/ast.ts` →
-   `assembly/parser.ts` → `assembly/interpreter.ts` → `assembly/index.ts` の順で実装する
-2. `tests/` を作り、Node.js上で `@assemblyscript/loader` 経由でwasmを読み込んで
-   DESIGN.md 8節のサンプルプログラムが正しく動くか確認する
-3. 最後にビルド成果物をbase64化し、外部fetchなしの単一HTML（コンソールUI）に
-   インライン埋め込みする（DESIGN.md 6〜7節）
+`dist/index.html` をブラウザで開くとDNCLプログラムをその場で実行できます
+（外部URLへのfetchは一切行いません）。
 
 `CONTINUE_PROMPT.md` に、Claude Codeへそのまま渡せる依頼文の例を用意しています。
