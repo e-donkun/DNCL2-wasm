@@ -2,9 +2,6 @@
 @external("env", "hostPrint")
 export declare function hostPrint(s: string): void;
 
-@external("env", "hostHasInput")
-export declare function hostHasInput(): bool;
-
 @external("env", "hostInput")
 export declare function hostInput(): string;
 

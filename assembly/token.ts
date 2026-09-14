@@ -17,7 +17,7 @@ export const enum TT {
   LINPUT = 11,   // 【
   RINPUT = 12,   // 】
   COMMA = 13,
-  ARROW = 14,    // 代入演算子。新仕様の "=" と旧仕様の "←"/"<-" の両方がここに入る
+  ASSIGN = 14,    // 代入演算子。新仕様の "=" と旧仕様の "←"/"<-" の両方がここに入る
   PLUS = 15,
   MINUS = 16,
   MUL = 17,

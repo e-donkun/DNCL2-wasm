@@ -21,9 +21,6 @@ async function runDncl(src, inputs) {
       hostPrint(ptr) {
         output += ex.__getString(ptr);
       },
-      hostHasInput() {
-        return queue.length > 0;
-      },
       hostInput() {
         const v = queue.length > 0 ? queue.shift() : "";
         return ex.__newString(v);
@@ -262,12 +259,73 @@ seki ← 1
   "120\n"
 );
 
+// ---- Python3への準拠（未定義挙動の実装判断） ----
+
+test(
+  "16: 真偽判定は文字列・配列も長さで判定する(Pythonのbool()相当)",
+  `
+もし "" ならば:
+    表示する("空文字は真")
+そうでなければ:
+    表示する("空文字は偽")
+もし [] ならば:
+    表示する("空配列は真")
+そうでなければ:
+    表示する("空配列は偽")
+もし "a" ならば:
+    表示する("非空文字は真")
+`,
+  "空文字は偽\n空配列は偽\n非空文字は真\n"
+);
+
+test(
+  "17: andは左辺が偽なら右辺を評価しない(短絡評価)",
+  `
+関数 inc() を
+    表示する("called")
+    inc ← 真
+と定義する
+kekka = (1==2) and inc()
+表示する(kekka)
+`,
+  "偽\n"
+);
+
+test(
+  "18: 文字列に対する添字アクセス(Pythonの文字列インデックス相当)",
+  `
+s = "hello"
+表示する(s[0], s[4])
+表示する(要素数(s))
+`,
+  "ho\n5\n"
+);
+
+test(
+  "19: 0除算はエラーになる(Pythonのゼロ除算例外相当)",
+  `
+表示する(1/0)
+`,
+  null,
+  { expectError: true }
+);
+
 async function main() {
   let pass = 0;
   let fail = 0;
   for (const t of tests) {
     try {
       const { output, error } = await runDncl(t.src, t.opts.inputs);
+      if (t.opts.expectError) {
+        if (error) {
+          console.log(`PASS ${t.name}`);
+          pass++;
+        } else {
+          console.log(`FAIL ${t.name}: エラーになるはずが正常終了しました（出力: ${JSON.stringify(output)}）`);
+          fail++;
+        }
+        continue;
+      }
       if (error) {
         console.log(`FAIL ${t.name}: 実行時エラー: ${error}`);
         fail++;

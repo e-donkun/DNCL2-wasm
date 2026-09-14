@@ -423,17 +423,17 @@ export class Parser {
     if (this.isType(TT.LBRACKET)) {
       const closePos = this.findMatchingClose(this.pos, TT.LBRACKET, TT.RBRACKET);
       const nextType = closePos >= 0 ? this.peekAt(closePos - this.pos + 1).type : TT.EOF;
-      if (closePos >= 0 && nextType == TT.ARROW) {
+      if (closePos >= 0 && nextType == TT.ASSIGN) {
         this.advance(); // consume "["
         const indices = this.parseIndexList();
         this.expectType(TT.RBRACKET, "]");
-        this.expectType(TT.ARROW, "=");
+        this.expectType(TT.ASSIGN, "=");
         const value = this.parseOr();
         return mkAssign(mkIndex(name, indices, line), value, line);
       }
       this.pos = startPos;
       return this.parseGenericStmt();
-    } else if (this.isType(TT.ARROW)) {
+    } else if (this.isType(TT.ASSIGN)) {
       this.advance();
       const value = this.parseOr();
       return mkAssign(mkVar(name, line), value, line);

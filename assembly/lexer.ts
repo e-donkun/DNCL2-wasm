@@ -41,7 +41,7 @@ function isWordChar(c: i32): bool {
 // tokenize() 本体で個別に先読み判定する。
 function singleCharTokenType(c: i32): i32 {
   switch (c) {
-    case 0x2190: return TT.ARROW; // ← (旧仕様の代入。新仕様の"="と共存)
+    case 0x2190: return TT.ASSIGN; // ← (旧仕様の代入。新仕様の"="と共存)
     case 0xff0b: return TT.PLUS; // ＋
     case 43: return TT.PLUS; // +
     case 0xff0d: return TT.MINUS; // －
@@ -189,7 +189,7 @@ export function tokenize(src: string): Token[] {
         i += 2;
         continue;
       }
-      tokens.push(new Token(TT.ARROW, "=", 0, line));
+      tokens.push(new Token(TT.ASSIGN, "=", 0, line));
       i++;
       continue;
     }
@@ -214,7 +214,7 @@ export function tokenize(src: string): Token[] {
     if (c == 60) {
       // <
       if (i + 1 < n && src.charCodeAt(i + 1) == 45) {
-        tokens.push(new Token(TT.ARROW, "<-", 0, line));
+        tokens.push(new Token(TT.ASSIGN, "<-", 0, line));
         i += 2;
         continue;
       }

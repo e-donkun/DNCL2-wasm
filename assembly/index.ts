@@ -1,7 +1,7 @@
 // エクスポート・ホストimport宣言（DESIGN.md 5.4節）
 import { tokenize } from "./lexer";
 import { parseProgram } from "./parser";
-import { runProgram as interpretProgram } from "./interpreter";
+import { runProgram as interpretProgram, seedRandomState } from "./interpreter";
 import { hasError, errorMessage, resetError } from "./errors";
 import { hostError } from "./host";
 
@@ -15,6 +15,14 @@ export function runProgram(src: string): void {
   if (hasError) {
     hostError(errorMessage);
   }
+}
+
+// 乱数()の種を設定する。ホスト(JS)側は「インタラクティブな入力を1回受け取るたびに
+// runProgramを最初からやり直す」方式（リプレイ方式）を採るため、同一の実行セッション
+// 内では毎回同じシードで呼び出すことで、乱数を含むプログラムでも再実行のたびに
+// 直前までの出力が変わらないようにする（dist/index.html参照）。
+export function seedRandom(seed: u32): void {
+  seedRandomState(seed);
 }
 
 // 字句解析結果をJSON文字列で返す（デバッグ/字句解析結果の可視化用。DESIGN.md 5.4節）
