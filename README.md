@@ -7,15 +7,21 @@ AssemblyScriptでWebAssemblyにコンパイルして、ブラウザのコンソ�
 ## 現在の状態
 
 実装・テスト・ビルド・HTML統合まで完了しています。
+**2022年11月改訂の新DNCL仕様（共通テスト用プログラム表記）に対応済み**で、
+代入 `=` ・配列リテラル `[]` ・比較 `==` ・論理演算子 `and/or/not` ・べき乗 `**` ・
+`表示する(...)` 関数呼び出し形式の表示文・コロン+インデントによるブロック構造を
+サポートします。旧仕様（2022年1月版）の記法も競合しない範囲で後方互換として
+引き続き使えます（詳細は `DNCL_SPEC_SUMMARY.md` 参照）。
 
-- ✅ `DNCL_SPEC_SUMMARY.md` — 実装対象の文法を整理したリファレンス
-- ✅ `DESIGN.md` — 字句解析・構文解析・インタプリタ・WASM統合の設計（かなり詳細）
+- ✅ `DNCL_SPEC_SUMMARY.md` — 実装対象の文法を整理したリファレンス（新仕様ベース）
+- ✅ `DESIGN.md` — 字句解析・構文解析・インタプリタ・WASM統合の設計（新仕様対応セクションあり）
 - ✅ `assembly/token.ts` / `lexer.ts` / `ast.ts` / `parser.ts` / `interpreter.ts` / `index.ts`
-- ✅ `tests/run.mjs` — Node.js単体テスト（DESIGN.md 8節のサンプル1〜6を含む11ケース、全パス）
+- ✅ `tests/run.mjs` — Node.js単体テスト（新仕様のサンプルに加え、PDF記載の二分探索
+  プログラムをそのまま検証、旧仕様の後方互換ケースも含め全17ケースがパス）
 - ✅ `npx asc assembly/index.ts --target release` のビルド確認（debug/releaseとも）
 - ✅ `dist/index.html` — 単一HTMLファイル（外部fetchなし、コンソールUI付き）。
   Playwright（ヘッドレスChromium）で実際に読み込み、サンプル実行・トークン一覧表示・
-  外部入力・論理演算子の左結合・エラー表示を確認済み
+  外部入力・論理演算子の優先順位・エラー表示を確認済み
 
 ## セットアップ
 

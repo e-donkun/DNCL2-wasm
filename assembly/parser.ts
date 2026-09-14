@@ -1,4 +1,9 @@
-// 構文解析（DESIGN.md 4節）
+// 構文解析
+//
+// 2022年11月改訂の「共通テスト用プログラム表記」（新DNCL）と、それ以前の記法（旧DNCL）
+// の両方を受け付ける。新旧で表記が競合する部分（代入演算子、配列リテラルの括弧、
+// 比較演算子の等号、論理演算子など）は新仕様を優先し、競合しない部分（関数定義、
+// 後判定ループ、増減の糖衣構文）は旧仕様も引き続きサポートする。
 import { Token, TT } from "./token";
 import {
   Node,
@@ -19,7 +24,6 @@ import {
   mkAssign,
   mkFillAll,
   mkIncDec,
-  mkDisplay,
   mkExprStmt,
   mkIf,
   mkWhilePre,
@@ -75,6 +79,11 @@ export class Parser {
     return false;
   }
 
+  // and/or/not はASCII英字のみなのでIDENTトークンとしてレキシングされる
+  isIdent(w: string): bool {
+    return this.curType() == TT.IDENT && this.cur().text == w;
+  }
+
   expectType(t: i32, what: string): Token {
     if (!this.isType(t)) {
       fail("構文エラー: 「" + what + "」が必要です", this.cur().line);
@@ -95,8 +104,10 @@ export class Parser {
     if (this.isType(TT.COMMA)) this.advance();
   }
 
+  // 旧仕様の行指向パース中に紛れ込みうるINDENT/DEDENTは読み飛ばす
+  // （旧仕様は閉じ語で構造を決めるため、インデントの有無自体は意味を持たない）
   skipNewlines(): void {
-    while (this.isType(TT.NEWLINE)) this.advance();
+    while (this.isType(TT.NEWLINE) || this.isType(TT.INDENT) || this.isType(TT.DEDENT)) this.advance();
   }
 
   consumeIdentOrWord(): string {
@@ -107,7 +118,7 @@ export class Parser {
     return "";
   }
 
-  // openPosから対応する閉じトークンの絶対位置を探す（深さカウント方式。DESIGN.md 4.3節）
+  // openPosから対応する閉じトークンの絶対位置を探す（深さカウント方式）
   findMatchingClose(openPos: i32, openType: i32, closeType: i32): i32 {
     let depth = 0;
     let i = openPos;
@@ -127,9 +138,16 @@ export class Parser {
     return -1;
   }
 
-  // ---- プログラム全体 ----
+  // ---- プログラム全体（最上位はインデント0） ----
+  //
+  // 文の直後に必ずNEWLINEが残っているとは限らない点に注意: もし/for/whileの
+  // 新仕様（コロン+インデント）はブロック本体側(parseBlockBody)が末尾の改行と
+  // DEDENTを既に消費し終えているため、戻ってきた時点で次の文の先頭トークンに
+  // 直接位置していることがある。そのため改行の有無を厳密には要求せず、
+  // 残っていれば読み飛ばすだけにする（真に壊れた入力は次のparseStatement内で
+  // エラーになる）。
   parseProgram(): Node[] {
-    this.skipNewlines();
+    while (this.isType(TT.NEWLINE)) this.advance();
     const stmts: Node[] = [];
     while (!this.isType(TT.EOF) && !hasError) {
       stmts.push(this.parseStatement());
@@ -139,12 +157,31 @@ export class Parser {
         stmts.push(this.parseStatement());
         if (hasError) break;
       }
-      this.skipNewlines();
+      while (this.isType(TT.NEWLINE)) this.advance();
     }
     return stmts;
   }
 
-  // ---- 式（優先順位: primary < unary < term < arith < comparison < logicalExpr < exprList）----
+  // 新仕様: "見出し行 ':'" の直後に呼び、NEWLINE→INDENT→文の並び→DEDENT を消費する
+  parseBlockBody(): Node[] {
+    this.expectType(TT.NEWLINE, "改行");
+    this.expectType(TT.INDENT, "インデント（ブロックの開始）");
+    const stmts: Node[] = [];
+    while (!this.isType(TT.DEDENT) && !this.isType(TT.EOF) && !hasError) {
+      stmts.push(this.parseStatement());
+      if (hasError) break;
+      while (this.isType(TT.COMMA)) {
+        this.advance();
+        stmts.push(this.parseStatement());
+        if (hasError) break;
+      }
+      while (this.isType(TT.NEWLINE)) this.advance();
+    }
+    this.expectType(TT.DEDENT, "インデント解除（ブロックの終了）");
+    return stmts;
+  }
+
+  // ---- 式（優先順位: primary < power < unary < term < arith < comparison < not < and < or）----
   parsePrimary(): Node {
     const line = this.cur().line;
     if (hasError) return mkNum(0, line);
@@ -159,11 +196,19 @@ export class Parser {
     }
     if (this.isType(TT.LPAREN)) {
       this.advance();
-      const e = this.parseLogicalExpr();
+      const e = this.parseOr();
       this.expectType(TT.RPAREN, ")");
       return e;
     }
+    if (this.isType(TT.LBRACKET)) {
+      // 新仕様: 配列リテラル [e1, e2, ...]
+      this.advance();
+      const elems = this.parseArgList();
+      this.expectType(TT.RBRACKET, "]");
+      return mkArrLit(elems, line);
+    }
     if (this.isType(TT.LBRACE)) {
+      // 旧仕様: 配列リテラル {e1, e2, ...}
       this.advance();
       const elems = this.parseArgList();
       this.expectType(TT.RBRACE, "}");
@@ -215,23 +260,35 @@ export class Parser {
 
   parseArgList(): Node[] {
     const args: Node[] = [];
-    if (this.isType(TT.RPAREN) || this.isType(TT.RBRACE)) return args;
-    args.push(this.parseLogicalExpr());
+    if (this.isType(TT.RPAREN) || this.isType(TT.RBRACE) || this.isType(TT.RBRACKET)) return args;
+    args.push(this.parseOr());
     while (this.isType(TT.COMMA)) {
       this.advance();
-      args.push(this.parseLogicalExpr());
+      args.push(this.parseOr());
     }
     return args;
   }
 
   parseIndexList(): Node[] {
     const idx: Node[] = [];
-    idx.push(this.parseLogicalExpr());
+    idx.push(this.parseOr());
     while (this.isType(TT.COMMA)) {
       this.advance();
-      idx.push(this.parseLogicalExpr());
+      idx.push(this.parseOr());
     }
     return idx;
+  }
+
+  // べき乗 "**" は単項マイナスより強く、右結合（2**-1 のように右側に単項マイナスを許す）
+  parsePower(): Node {
+    const line = this.cur().line;
+    const base = this.parsePrimary();
+    if (this.isType(TT.POW)) {
+      this.advance();
+      const exponent = this.parseUnary();
+      return mkBinop("**", base, exponent, line);
+    }
+    return base;
   }
 
   parseUnary(): Node {
@@ -244,7 +301,7 @@ export class Parser {
       this.advance();
       return this.parseUnary();
     }
-    return this.parsePrimary();
+    return this.parsePower();
   }
 
   parseTerm(): Node {
@@ -299,7 +356,7 @@ export class Parser {
     const left = this.parseArith();
     const line = this.cur().line;
     let op = "";
-    if (this.isType(TT.EQ)) op = "=";
+    if (this.isType(TT.EQ)) op = "==";
     else if (this.isType(TT.NEQ)) op = "!=";
     else if (this.isType(TT.GT)) op = ">";
     else if (this.isType(TT.GE)) op = ">=";
@@ -313,56 +370,51 @@ export class Parser {
     return left;
   }
 
-  // 論理演算子には優先順位がなく、左から出現順に逐次評価される（DNCL_SPEC_SUMMARY.md 4.3節）
-  parseLogicalExpr(): Node {
-    let acc = this.parseComparison();
-    while (true) {
-      if (this.isWord("でない")) {
-        const line = this.cur().line;
-        this.advance();
-        acc = mkNot(acc, line);
-        continue;
-      }
-      if (this.isWord("かつ")) {
-        const line = this.cur().line;
-        this.advance();
-        acc = mkAnd(acc, this.parseComparison(), line);
-        continue;
-      }
-      if (this.isWord("または")) {
-        const line = this.cur().line;
-        this.advance();
-        acc = mkOr(acc, this.parseComparison(), line);
-        continue;
-      }
-      break;
+  // 新仕様の論理演算子 not/and/or は一般的なプログラミング言語と同じ優先順位
+  // （not > and > or）で実装する（PDFに明記はないが、Python3との対比表が
+  // 用意されるなど強くPython準拠を意識した表記であるため、この解釈を採用した）。
+  parseNot(): Node {
+    const line = this.cur().line;
+    if (this.isIdent("not")) {
+      this.advance();
+      return mkNot(this.parseNot(), line);
+    }
+    return this.parseComparison();
+  }
+
+  parseAnd(): Node {
+    let acc = this.parseNot();
+    while (this.isIdent("and")) {
+      const line = this.cur().line;
+      this.advance();
+      acc = mkAnd(acc, this.parseNot(), line);
     }
     return acc;
   }
 
-  parseExprList(): Node[] {
-    const list: Node[] = [];
-    list.push(this.parseLogicalExpr());
-    while (this.isWord("と")) {
+  parseOr(): Node {
+    let acc = this.parseAnd();
+    while (this.isIdent("or")) {
+      const line = this.cur().line;
       this.advance();
-      list.push(this.parseLogicalExpr());
+      acc = mkOr(acc, this.parseAnd(), line);
     }
-    return list;
+    return acc;
   }
 
   // ---- 文 ----
   parseStatement(): Node {
     const line = this.cur().line;
     if (hasError) return mkExprStmt(mkNum(0, line), line);
-    if (this.isWord("もし")) return this.parseIfChain("もし");
-    if (this.isWord("繰り返し")) return this.parseWhilePost();
-    if (this.isWord("関数")) return this.parseFuncDef();
+    if (this.isWord("もし")) return this.parseIfChain();
+    if (this.isWord("繰り返し")) return this.parseWhilePost(); // 旧仕様: 後判定ループ
+    if (this.isWord("関数")) return this.parseFuncDef(); // 旧仕様: 関数定義
     if (this.isType(TT.IDENT)) return this.parseIdentLed();
-    return this.parseExprLed();
+    return this.parseGenericStmt();
   }
 
   // IDENTで始まる文の判別。1トークン先読みでは分岐できないため、
-  // "["に対応する"]"の直後を覗き見て代入文かどうかを判定する（DESIGN.md 4.2節）
+  // "["に対応する"]"の直後を覗き見て代入文かどうかを判定する
   parseIdentLed(): Node {
     const startPos = this.pos;
     const line = this.cur().line;
@@ -375,25 +427,33 @@ export class Parser {
         this.advance(); // consume "["
         const indices = this.parseIndexList();
         this.expectType(TT.RBRACKET, "]");
-        this.expectType(TT.ARROW, "←");
-        const value = this.parseLogicalExpr();
+        this.expectType(TT.ARROW, "=");
+        const value = this.parseOr();
         return mkAssign(mkIndex(name, indices, line), value, line);
       }
       this.pos = startPos;
-      return this.parseExprLed();
+      return this.parseGenericStmt();
     } else if (this.isType(TT.ARROW)) {
       this.advance();
-      const value = this.parseLogicalExpr();
+      const value = this.parseOr();
       return mkAssign(mkVar(name, line), value, line);
-    } else if (this.isWord("のすべての要素に")) {
+    } else if (this.isWord("のすべての値を")) {
+      // 新仕様: 配列のすべての値を代入する
       this.advance();
-      const value = this.parseLogicalExpr();
+      const value = this.parseOr();
+      this.expectWord("にする");
+      return mkFillAll(name, value, line);
+    } else if (this.isWord("のすべての要素に")) {
+      // 旧仕様: 配列のすべての要素に代入する
+      this.advance();
+      const value = this.parseOr();
       this.expectWord("を代入する");
       return mkFillAll(name, value, line);
     } else if (this.isWord("を")) {
       this.advance();
       const e1 = this.parseArith();
       if (this.isWord("増やす")) {
+        // 旧仕様: 増減の糖衣構文
         this.advance();
         return mkIncDec(mkVar(name, line), e1, true, line);
       }
@@ -406,58 +466,93 @@ export class Parser {
         const toE = this.parseArith();
         this.expectWord("まで");
         const stepE = this.parseArith();
-        let increasing = true;
-        if (this.isWord("ずつ増やしながら")) {
-          increasing = true;
+        if (this.isWord("ずつ増やしながら繰り返す")) {
+          // 新仕様: "繰り返す" が合体した語 + ":" + インデントブロック
           this.advance();
-        } else if (this.isWord("ずつ減らしながら")) {
-          increasing = false;
-          this.advance();
-        } else {
-          fail("「ずつ増やしながら」または「ずつ減らしながら」が必要です", this.cur().line);
+          this.expectType(TT.COLON, ":");
+          const body = this.parseBlockBody();
+          return mkFor(name, e1, toE, stepE, true, body, line);
         }
-        this.consumeOptionalComma();
-        const body = this.parseBodyBlock(["を繰り返す"]);
-        this.expectWord("を繰り返す");
-        return mkFor(name, e1, toE, stepE, increasing, body, line);
+        if (this.isWord("ずつ減らしながら繰り返す")) {
+          this.advance();
+          this.expectType(TT.COLON, ":");
+          const body = this.parseBlockBody();
+          return mkFor(name, e1, toE, stepE, false, body, line);
+        }
+        if (this.isWord("ずつ増やしながら")) {
+          // 旧仕様: カンマ+本体+閉じ語
+          this.advance();
+          this.consumeOptionalComma();
+          const body = this.parseBodyBlock(["を繰り返す"]);
+          this.expectWord("を繰り返す");
+          return mkFor(name, e1, toE, stepE, true, body, line);
+        }
+        if (this.isWord("ずつ減らしながら")) {
+          this.advance();
+          this.consumeOptionalComma();
+          const body = this.parseBodyBlock(["を繰り返す"]);
+          this.expectWord("を繰り返す");
+          return mkFor(name, e1, toE, stepE, false, body, line);
+        }
+        fail("「ずつ増やしながら」または「ずつ減らしながら」が必要です", this.cur().line);
+        return mkExprStmt(mkNum(0, line), line);
       }
       fail("予期しないトークンです", this.cur().line);
       return mkExprStmt(mkNum(0, line), line);
     } else {
       this.pos = startPos;
-      return this.parseExprLed();
+      return this.parseGenericStmt();
     }
   }
 
-  // display文 / while前判定 / 手続き呼び出し文の判別
-  parseExprLed(): Node {
+  // 式文（表示する(...)などの関数呼び出しを含む）／前判定ループの判別
+  parseGenericStmt(): Node {
     const line = this.cur().line;
-    const list = this.parseExprList();
-    if (hasError) return mkExprStmt(mkNum(0, line), line);
-    if (this.isWord("を表示する")) {
+    const expr = this.parseOr();
+    if (hasError) return mkExprStmt(expr, line);
+    if (this.isWord("の間繰り返す")) {
+      // 新仕様: "の間" + "繰り返す" が合体した語 + ":" + インデントブロック
       this.advance();
-      return mkDisplay(list, line);
+      this.expectType(TT.COLON, ":");
+      const body = this.parseBlockBody();
+      return mkWhilePre(expr, body, line);
     }
-    if (list.length == 1) {
-      if (this.isWord("の間")) {
-        this.advance();
-        this.consumeOptionalComma();
-        const body = this.parseBodyBlock(["を繰り返す"]);
-        this.expectWord("を繰り返す");
-        return mkWhilePre(list[0], body, line);
-      }
-      return mkExprStmt(list[0], line);
+    if (this.isWord("の間")) {
+      // 旧仕様: カンマ+本体+閉じ語
+      this.advance();
+      this.consumeOptionalComma();
+      const body = this.parseBodyBlock(["を繰り返す"]);
+      this.expectWord("を繰り返す");
+      return mkWhilePre(expr, body, line);
     }
-    fail("「を表示する」または「の間」が見つかりません", this.cur().line);
-    return mkExprStmt(list[0], line);
+    return mkExprStmt(expr, line);
   }
 
-  // もし/そうでなくもし共通。else節は再帰でチェーンする
-  parseIfChain(introWord: string): Node {
+  // もし/そうでなくもし共通。新仕様(":" + インデント)と旧仕様(を実行する等の閉じ語)の
+  // 両方をならば直後のトークンで判別する
+  parseIfChain(): Node {
     const line = this.cur().line;
-    this.expectWord(introWord);
-    const cond = this.parseLogicalExpr();
+    this.advance(); // もし または そうでなくもし
+    const cond = this.parseOr();
     this.expectWord("ならば");
+
+    if (this.isType(TT.COLON)) {
+      this.advance();
+      const thenStmts = this.parseBlockBody();
+      if (this.isWord("そうでなくもし")) {
+        const elseNode = this.parseIfChain();
+        return mkIf(cond, thenStmts, [elseNode], line);
+      }
+      if (this.isWord("そうでなければ")) {
+        this.advance();
+        this.expectType(TT.COLON, ":");
+        const elseStmts = this.parseBlockBody();
+        return mkIf(cond, thenStmts, elseStmts, line);
+      }
+      return mkIf(cond, thenStmts, null, line);
+    }
+
+    // 旧仕様
     const thenStmts = this.parseBodyBlock(["を実行する", "を実行し"]);
     if (this.isWord("を実行する")) {
       this.advance();
@@ -466,7 +561,7 @@ export class Parser {
     this.expectWord("を実行し");
     this.consumeOptionalComma();
     if (this.isWord("そうでなくもし")) {
-      const elseNode = this.parseIfChain("そうでなくもし");
+      const elseNode = this.parseIfChain();
       return mkIf(cond, thenStmts, [elseNode], line);
     }
     this.expectWord("そうでなければ");
@@ -475,7 +570,7 @@ export class Parser {
     return mkIf(cond, thenStmts, elseStmts, line);
   }
 
-  // 単一行形式と複数行形式の両対応
+  // 旧仕様: 単一行形式と複数行形式の両対応の本体ブロック（閉じ語で終端）
   parseBodyBlock(stopWords: string[]): Node[] {
     if (this.isType(TT.NEWLINE)) {
       this.skipNewlines();
@@ -510,7 +605,7 @@ export class Parser {
     return stmts;
   }
 
-  // 後判定ループの本体は、"を"の直後に","が続く箇所までを読む（DESIGN.md 4.2節）
+  // 旧仕様の後判定ループの本体は、"を"の直後に","が続く箇所までを読む
   parseStatementsUntilTuComma(): Node[] {
     const stmts: Node[] = [];
     while (true) {
@@ -531,6 +626,7 @@ export class Parser {
     return stmts;
   }
 
+  // 旧仕様: 後判定ループ 「繰り返し，〈処理〉を，〈条件〉になるまで実行する」
   parseWhilePost(): Node {
     const line = this.cur().line;
     this.expectWord("繰り返し");
@@ -539,11 +635,12 @@ export class Parser {
     const body = this.parseStatementsUntilTuComma();
     this.expectWord("を");
     this.expectType(TT.COMMA, "，");
-    const cond = this.parseLogicalExpr();
+    const cond = this.parseOr();
     this.expectWord("になるまで実行する");
     return mkWhilePost(cond, body, line);
   }
 
+  // 旧仕様: 関数定義 「関数 name(params) を 〈処理〉 と定義する」
   parseFuncDef(): Node {
     const line = this.cur().line;
     this.expectWord("関数");

@@ -11,27 +11,23 @@ const outPath = path.join(outDir, "index.html");
 
 const wasmBase64 = readFileSync(wasmPath).toString("base64");
 
-const SAMPLE_PROGRAM = `# 1からnまでの和を表示する関数を定義して呼び出す例
-関数 wa(n) を
-    goukei ← 0
-    i を 1 から n まで 1 ずつ増やしながら，
-        goukei ← goukei + i
-    を繰り返す
-    wa ← goukei
-と定義する
+const SAMPLE_PROGRAM = `# 共通テスト用プログラム表記（2022年11月改訂・新仕様）の例
+# 配列から最大値を探す
+Data = [3, 7, 2, 9, 4]
+saidai = Data[0]
+i を 0 から 4 まで 1 ずつ増やしながら繰り返す:
+    もし Data[i] > saidai ならば:
+        saidai = Data[i]
+表示する("saidai = ", saidai)
 
-wa(10) を表示する
+# べき乗演算子と整数への切り捨て
+表示する("2 ** 10 = ", 2 ** 10)
+表示する("整数(3.9) = ", 整数(3.9))
 
-# 配列と条件分岐の例
-Data ← {3, 7, 2, 9, 4}
-saidai ← Data[0]
-i を 0 から 4 まで 1 ずつ増やしながら，
-    もし Data[i] > saidai ならば
-        saidai ← Data[i]
-    を実行する
-を繰り返す
-"saidai = " を表示する
-saidai を表示する
+# 論理演算子 and/or/not（優先順位は not > and > or）
+a = (1 == 1)
+b = (1 == 2)
+表示する("a or b and (not b) = ", a or b and (not b))
 `;
 
 const html = `<!DOCTYPE html>
@@ -280,7 +276,8 @@ const TT_NAMES = [
   "LPAREN", "RPAREN", "LBRACKET", "RBRACKET", "LBRACE", "RBRACE",
   "LINPUT", "RINPUT", "COMMA", "ARROW",
   "PLUS", "MINUS", "MUL", "DIV", "IDIV", "MOD",
-  "EQ", "NEQ", "GT", "GE", "LT", "LE", "EOF"
+  "EQ", "NEQ", "GT", "GE", "LT", "LE",
+  "POW", "COLON", "INDENT", "DEDENT", "EOF"
 ];
 
 async function initWasm() {

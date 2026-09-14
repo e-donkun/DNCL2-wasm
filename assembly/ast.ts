@@ -17,7 +17,6 @@ export const enum NK {
   ASSIGN,
   FILL_ALL,
   INCDEC,
-  DISPLAY,
   EXPR_STMT,
   IF,
   WHILE_PRE,
@@ -40,9 +39,8 @@ export const enum NK {
 // CALL: str=関数名, list=引数式
 // ASSIGN: a=代入先(VAR or INDEX), b=値式
 // FILL_ALL: str=配列名, a=値式
-// INCDEC: a=対象(VAR), b=増減量式, flag=true→増やす/false→減らす
-// DISPLAY: list=表示する式の並び
-// EXPR_STMT: a=式（手続き呼び出しを文として使う場合）
+// INCDEC: a=対象(VAR), b=増減量式, flag=true→増やす/false→減らす（旧仕様の糖衣構文。新仕様にはない）
+// EXPR_STMT: a=式（手続き呼び出しを文として使う場合。新仕様の 表示する(...) もこれ）
 // IF: a=条件, list=then節の文, elseList=else節の文（nullならelseなし）
 // WHILE_PRE: a=条件, list=本体文
 // WHILE_POST: a=条件, list=本体文
@@ -176,12 +174,6 @@ export function mkIncDec(target: Node, amount: Node, increase: bool, line: i32):
   n.a = target;
   n.b = amount;
   n.flag = increase;
-  return n;
-}
-
-export function mkDisplay(exprs: Node[], line: i32): Node {
-  const n = new Node(NK.DISPLAY, line);
-  n.list = exprs;
   return n;
 }
 

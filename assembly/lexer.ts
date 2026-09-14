@@ -1,11 +1,19 @@
-// 字句解析（DESIGN.md 1節）
-// 設計のキモ: 「同じ文字カテゴリの最大連続runを1トークンにする」方式。
+// 字句解析
+// 設計のキモ（新旧共通）: 「同じ文字カテゴリの最大連続runを1トークンにする」方式。
 // ASCII識別子 / 数字 / 日本語文字(ひらがな・カタカナ・漢字) / 記号1〜2文字 の
 // 4カテゴリに分け、カテゴリが変わる箇所で自然にトークンが分割される。
+//
+// 新仕様（2022年11月改訂）ではブロック構造が「:」+インデントで表される（Python類似）。
+// このレキサはPythonのトークナイザと同様に、各論理行の先頭で字下げ幅を測定し、
+// 増加したらINDENT、減少したらDEDENTトークンを発行する。参考PDFに現れる｜(U+FF5C)・
+// ⎿(U+23BF) は目視用のブロックガイド線であり、字下げ文字と同じ「空白」として扱うことで
+// 半角スペースによるインデントとPDFからのコピー＆ペーストの両方を受け付ける。
 import { Token, TT } from "./token";
+import { fail } from "./errors";
 
-function isInlineSpace(c: i32): bool {
-  return c == 32 || c == 9 || c == 0x3000; // 半角/タブ/全角スペース
+// 半角/タブ/全角スペース、および｜・⎿（ブロックガイド記号）はすべて「空白」として扱う
+function isSpaceLike(c: i32): bool {
+  return c == 32 || c == 9 || c == 0x3000 || c == 0xff5c || c == 0x23bf;
 }
 
 function isDigit(c: i32): bool {
@@ -29,22 +37,21 @@ function isWordChar(c: i32): bool {
 }
 
 // 全角/半角の対応表にある1文字記号 → トークン種別（該当なしは-1）
+// "=" '*' ':' は前後の文字次第で2文字トークンになりうるため、ここには含めず
+// tokenize() 本体で個別に先読み判定する。
 function singleCharTokenType(c: i32): i32 {
   switch (c) {
-    case 0x2190: return TT.ARROW; // ←
+    case 0x2190: return TT.ARROW; // ← (旧仕様の代入。新仕様の"="と共存)
     case 0xff0b: return TT.PLUS; // ＋
     case 43: return TT.PLUS; // +
     case 0xff0d: return TT.MINUS; // －
     case 45: return TT.MINUS; // -
     case 0x00d7: return TT.MUL; // ×
-    case 42: return TT.MUL; // *
     case 0xff0f: return TT.DIV; // ／
     case 47: return TT.DIV; // /
     case 0x00f7: return TT.IDIV; // ÷
     case 0xff05: return TT.MOD; // ％
     case 37: return TT.MOD; // %
-    case 0xff1d: return TT.EQ; // ＝
-    case 61: return TT.EQ; // =
     case 0x2260: return TT.NEQ; // ≠
     case 0xff1e: return TT.GT; // ＞
     case 0x2267: return TT.GE; // ≧
@@ -56,12 +63,13 @@ function singleCharTokenType(c: i32): i32 {
     case 41: return TT.RPAREN; // )
     case 91: return TT.LBRACKET; // [
     case 93: return TT.RBRACKET; // ]
-    case 123: return TT.LBRACE; // {
+    case 123: return TT.LBRACE; // { （旧仕様の配列リテラル。後方互換）
     case 125: return TT.RBRACE; // }
     case 0x3010: return TT.LINPUT; // 【
     case 0x3011: return TT.RINPUT; // 】
     case 0xff0c: return TT.COMMA; // ，
     case 44: return TT.COMMA; // ,
+    case 0xff1a: return TT.COLON; // ：
     default: return -1;
   }
 }
@@ -78,8 +86,38 @@ export function tokenize(src: string): Token[] {
   const n = src.length;
   let i = 0;
   let line = 1;
+  const indentStack: i32[] = [0];
+  let atLineStart = true;
 
   while (i < n) {
+    if (atLineStart) {
+      let width = 0;
+      while (i < n && isSpaceLike(src.charCodeAt(i))) {
+        width++;
+        i++;
+      }
+      const c0 = i < n ? src.charCodeAt(i) : -1;
+      const isBlankOrComment = i >= n || c0 == 10 || c0 == 13 || c0 == 35;
+      if (!isBlankOrComment) {
+        const top = indentStack[indentStack.length - 1];
+        if (width > top) {
+          indentStack.push(width);
+          tokens.push(new Token(TT.INDENT, "", 0, line));
+        } else if (width < top) {
+          while (indentStack.length > 1 && indentStack[indentStack.length - 1] > width) {
+            indentStack.pop();
+            tokens.push(new Token(TT.DEDENT, "", 0, line));
+          }
+          if (indentStack[indentStack.length - 1] != width) {
+            fail("インデントが揃っていません", line);
+            indentStack.push(width);
+          }
+        }
+      }
+      atLineStart = false;
+      continue;
+    }
+
     const c = src.charCodeAt(i);
 
     if (c == 10) {
@@ -87,14 +125,15 @@ export function tokenize(src: string): Token[] {
       pushNewline(tokens, line);
       line++;
       i++;
+      atLineStart = true;
       continue;
     }
     if (c == 13) {
-      // \r （\r\nの\rは無視。単独\rも改行扱いにはしない仕様）
+      // \r （\r\nの\rは無視）
       i++;
       continue;
     }
-    if (isInlineSpace(c)) {
+    if (isSpaceLike(c)) {
       i++;
       continue;
     }
@@ -114,7 +153,7 @@ export function tokenize(src: string): Token[] {
       continue;
     }
     if (c == 0x300c) {
-      // 「...」 文字列
+      // 「...」 文字列（旧仕様。後方互換で存続）
       i++;
       const start = i;
       while (i < n && src.charCodeAt(i) != 0x300d) i++;
@@ -141,6 +180,34 @@ export function tokenize(src: string): Token[] {
       while (i < n && isAsciiIdentPart(src.charCodeAt(i))) i++;
       const text = src.substring(start, i);
       tokens.push(new Token(TT.IDENT, text, 0, line));
+      continue;
+    }
+    // "=" は次の文字が"="かどうかで ASSIGN("=") / EQ("==") を切り替える
+    if (c == 61) {
+      if (i + 1 < n && src.charCodeAt(i + 1) == 61) {
+        tokens.push(new Token(TT.EQ, "==", 0, line));
+        i += 2;
+        continue;
+      }
+      tokens.push(new Token(TT.ARROW, "=", 0, line));
+      i++;
+      continue;
+    }
+    // "*" は次の文字が"*"かどうかで MUL("*") / POW("**") を切り替える
+    if (c == 42) {
+      if (i + 1 < n && src.charCodeAt(i + 1) == 42) {
+        tokens.push(new Token(TT.POW, "**", 0, line));
+        i += 2;
+        continue;
+      }
+      tokens.push(new Token(TT.MUL, "*", 0, line));
+      i++;
+      continue;
+    }
+    if (c == 58) {
+      // : コロン（新仕様の制御文ヘッダ終端）
+      tokens.push(new Token(TT.COLON, ":", 0, line));
+      i++;
       continue;
     }
     // 半角記号の複数文字組み合わせ（全角対応が用意されていないものだけ先読み判定）
@@ -202,6 +269,14 @@ export function tokenize(src: string): Token[] {
     }
     // 未知の文字は無視して読み進める
     i++;
+  }
+
+  if (tokens.length > 0 && tokens[tokens.length - 1].type != TT.NEWLINE) {
+    tokens.push(new Token(TT.NEWLINE, "\n", 0, line));
+  }
+  while (indentStack.length > 1) {
+    indentStack.pop();
+    tokens.push(new Token(TT.DEDENT, "", 0, line));
   }
   tokens.push(new Token(TT.EOF, "", 0, line));
   return tokens;
