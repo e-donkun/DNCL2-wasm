@@ -1,0 +1,607 @@
+// インタプリタ設計（DESIGN.md 5節）
+import { Node, NK } from "./ast";
+import { fail, hasError } from "./errors";
+import { hostPrint, hostHasInput, hostInput } from "./host";
+
+export const enum VK {
+  NUM,
+  STR,
+  BOOL,
+  ARR,
+  NIL
+}
+
+export class Value {
+  kind: i32;
+  num: f64 = 0;
+  str: string = "";
+  arr: Value[] | null = null;
+}
+
+function numVal(v: f64): Value {
+  const r = new Value();
+  r.kind = VK.NUM;
+  r.num = v;
+  return r;
+}
+
+function strVal(v: string): Value {
+  const r = new Value();
+  r.kind = VK.STR;
+  r.str = v;
+  return r;
+}
+
+function boolVal(v: bool): Value {
+  const r = new Value();
+  r.kind = VK.BOOL;
+  r.num = v ? 1 : 0;
+  return r;
+}
+
+function arrVal(v: Value[]): Value {
+  const r = new Value();
+  r.kind = VK.ARR;
+  r.arr = v;
+  return r;
+}
+
+function nilVal(): Value {
+  const r = new Value();
+  r.kind = VK.NIL;
+  return r;
+}
+
+function isTruthy(v: Value): bool {
+  if (v.kind == VK.BOOL) return v.num != 0;
+  if (v.kind == VK.NUM) return v.num != 0;
+  return false;
+}
+
+// NUM: 整数値ならゼロ埋めなしの整数表記、そうでなければ素直な10進表記（DESIGN.md 3節）
+export function valueToDisplayString(v: Value): string {
+  if (v.kind == VK.NUM) return formatNum(v.num);
+  if (v.kind == VK.STR) return v.str;
+  if (v.kind == VK.BOOL) return v.num != 0 ? "真" : "偽";
+  if (v.kind == VK.ARR) {
+    const arr = v.arr!;
+    let s = "";
+    for (let i = 0; i < arr.length; i++) {
+      if (i > 0) s += ",";
+      s += valueToDisplayString(arr[i]);
+    }
+    return s;
+  }
+  return "";
+}
+
+function formatNum(v: f64): string {
+  if (isNaN(v)) return "NaN";
+  if (!isFinite(v)) return v > 0 ? "Infinity" : "-Infinity";
+  if (Math.floor(v) == v && Math.abs(v) < 1e15) {
+    return i64(v).toString();
+  }
+  return v.toString();
+}
+
+function toBinaryString(v: i64): string {
+  if (v == 0) return "0";
+  const neg = v < 0;
+  let uv: u64 = neg ? u64(-v) : u64(v);
+  let s = "";
+  while (uv > 0) {
+    s = ((uv & 1) == 1 ? "1" : "0") + s;
+    uv = uv >> 1;
+  }
+  return neg ? "-" + s : s;
+}
+
+export class Interpreter {
+  globals: Map<string, Value> = new Map();
+  funcs: Map<string, Node> = new Map();
+  callStack: Map<string, Value>[] = [];
+
+  currentScope(): Map<string, Value> | null {
+    const n = this.callStack.length;
+    return n > 0 ? this.callStack[n - 1] : null;
+  }
+
+  // 読み出しはローカルになければグローバルにフォールバックする（DESIGN.md 5.2節）
+  getVar(name: string, line: i32): Value {
+    const scope = this.currentScope();
+    if (scope != null && scope.has(name)) return scope.get(name);
+    if (this.globals.has(name)) return this.globals.get(name);
+    fail("未定義の変数です: " + name, line);
+    return nilVal();
+  }
+
+  // 代入は常にローカル優先（関数内なら）で書き込む（DESIGN.md 5.2節）
+  setVar(name: string, v: Value): void {
+    const scope = this.currentScope();
+    if (scope != null) {
+      scope.set(name, v);
+    } else {
+      this.globals.set(name, v);
+    }
+  }
+
+  runProgram(stmts: Node[]): void {
+    for (let i = 0; i < stmts.length; i++) {
+      if (stmts[i].kind == NK.FUNCDEF) this.funcs.set(stmts[i].str, stmts[i]);
+    }
+    for (let i = 0; i < stmts.length; i++) {
+      if (stmts[i].kind == NK.FUNCDEF) continue;
+      this.execStmt(stmts[i]);
+      if (hasError) return;
+    }
+  }
+
+  execBlock(stmts: Node[]): void {
+    for (let i = 0; i < stmts.length; i++) {
+      this.execStmt(stmts[i]);
+      if (hasError) return;
+    }
+  }
+
+  execStmt(n: Node): void {
+    if (hasError) return;
+    switch (n.kind) {
+      case NK.ASSIGN:
+        this.execAssign(n);
+        return;
+      case NK.FILL_ALL:
+        this.execFillAll(n);
+        return;
+      case NK.INCDEC:
+        this.execIncDec(n);
+        return;
+      case NK.DISPLAY:
+        this.execDisplay(n);
+        return;
+      case NK.EXPR_STMT:
+        this.evalExpr(n.a!);
+        return;
+      case NK.IF:
+        this.execIf(n);
+        return;
+      case NK.WHILE_PRE:
+        this.execWhilePre(n);
+        return;
+      case NK.WHILE_POST:
+        this.execWhilePost(n);
+        return;
+      case NK.FOR:
+        this.execFor(n);
+        return;
+      case NK.FUNCDEF:
+        this.funcs.set(n.str, n);
+        return;
+      default:
+        fail("不明な文です", n.line);
+        return;
+    }
+  }
+
+  execAssign(n: Node): void {
+    const value = this.evalExpr(n.b!);
+    if (hasError) return;
+    const target = n.a!;
+    if (target.kind == NK.VAR) {
+      this.setVar(target.str, value);
+    } else if (target.kind == NK.INDEX) {
+      this.assignIndex(target, value);
+    } else {
+      fail("代入先が不正です", n.line);
+    }
+  }
+
+  // 配列の添字は0始まりとして扱う
+  assignIndex(target: Node, value: Value): void {
+    const name = target.str;
+    const indices = target.list!;
+    let container = this.getVar(name, target.line);
+    if (hasError) return;
+    for (let i = 0; i < indices.length - 1; i++) {
+      const idxVal = this.evalExpr(indices[i]);
+      if (hasError) return;
+      if (container.kind != VK.ARR || container.arr == null) {
+        fail("配列ではありません: " + name, target.line);
+        return;
+      }
+      const idx = <i32>Math.round(idxVal.num);
+      const a = container.arr!;
+      if (idx < 0 || idx >= a.length) {
+        fail("添字が範囲外です", target.line);
+        return;
+      }
+      container = a[idx];
+    }
+    if (container.kind != VK.ARR || container.arr == null) {
+      fail("配列ではありません: " + name, target.line);
+      return;
+    }
+    const lastIdxVal = this.evalExpr(indices[indices.length - 1]);
+    if (hasError) return;
+    const lastIdx = <i32>Math.round(lastIdxVal.num);
+    const a = container.arr!;
+    if (lastIdx < 0 || lastIdx >= a.length) {
+      fail("添字が範囲外です", target.line);
+      return;
+    }
+    a[lastIdx] = value;
+  }
+
+  execFillAll(n: Node): void {
+    const value = this.evalExpr(n.a!);
+    if (hasError) return;
+    const container = this.getVar(n.str, n.line);
+    if (hasError) return;
+    if (container.kind != VK.ARR || container.arr == null) {
+      fail("配列ではありません: " + n.str, n.line);
+      return;
+    }
+    const a = container.arr!;
+    for (let i = 0; i < a.length; i++) a[i] = value;
+  }
+
+  execIncDec(n: Node): void {
+    const target = n.a!;
+    if (target.kind != NK.VAR) {
+      fail("増減の対象が変数ではありません", n.line);
+      return;
+    }
+    const cur = this.getVar(target.str, n.line);
+    if (hasError) return;
+    const amt = this.evalExpr(n.b!);
+    if (hasError) return;
+    if (cur.kind != VK.NUM || amt.kind != VK.NUM) {
+      fail("数値ではありません", n.line);
+      return;
+    }
+    this.setVar(target.str, numVal(n.flag ? cur.num + amt.num : cur.num - amt.num));
+  }
+
+  execDisplay(n: Node): void {
+    const list = n.list!;
+    let s = "";
+    for (let i = 0; i < list.length; i++) {
+      const v = this.evalExpr(list[i]);
+      if (hasError) return;
+      s += valueToDisplayString(v);
+    }
+    hostPrint(s + "\n");
+  }
+
+  execIf(n: Node): void {
+    const cond = this.evalExpr(n.a!);
+    if (hasError) return;
+    if (isTruthy(cond)) {
+      this.execBlock(n.list!);
+    } else if (n.elseList != null) {
+      this.execBlock(n.elseList!);
+    }
+  }
+
+  execWhilePre(n: Node): void {
+    let guard: i32 = 0;
+    while (true) {
+      const cond = this.evalExpr(n.a!);
+      if (hasError) return;
+      if (!isTruthy(cond)) break;
+      this.execBlock(n.list!);
+      if (hasError) return;
+      guard++;
+      if (guard > 10000000) {
+        fail("ループの繰り返し回数が上限を超えました", n.line);
+        return;
+      }
+    }
+  }
+
+  execWhilePost(n: Node): void {
+    let guard: i32 = 0;
+    while (true) {
+      this.execBlock(n.list!);
+      if (hasError) return;
+      const cond = this.evalExpr(n.a!);
+      if (hasError) return;
+      if (isTruthy(cond)) break;
+      guard++;
+      if (guard > 10000000) {
+        fail("ループの繰り返し回数が上限を超えました", n.line);
+        return;
+      }
+    }
+  }
+
+  execFor(n: Node): void {
+    const fromV = this.evalExpr(n.a!);
+    if (hasError) return;
+    const toV = this.evalExpr(n.b!);
+    if (hasError) return;
+    const stepV = this.evalExpr(n.c!);
+    if (hasError) return;
+    if (fromV.kind != VK.NUM || toV.kind != VK.NUM || stepV.kind != VK.NUM) {
+      fail("繰返し文の値は数値である必要があります", n.line);
+      return;
+    }
+    let v = fromV.num;
+    const to = toV.num;
+    const step = Math.abs(stepV.num);
+    let guard: i32 = 0;
+    if (n.flag) {
+      while (v <= to) {
+        this.setVar(n.str, numVal(v));
+        this.execBlock(n.list!);
+        if (hasError) return;
+        v += step;
+        guard++;
+        if (guard > 10000000) {
+          fail("ループの繰り返し回数が上限を超えました", n.line);
+          return;
+        }
+      }
+    } else {
+      while (v >= to) {
+        this.setVar(n.str, numVal(v));
+        this.execBlock(n.list!);
+        if (hasError) return;
+        v -= step;
+        guard++;
+        if (guard > 10000000) {
+          fail("ループの繰り返し回数が上限を超えました", n.line);
+          return;
+        }
+      }
+    }
+  }
+
+  evalExpr(n: Node): Value {
+    if (hasError) return nilVal();
+    switch (n.kind) {
+      case NK.NUM:
+        return numVal(n.num);
+      case NK.STR:
+        return strVal(n.str);
+      case NK.BOOL:
+        return boolVal(n.num != 0);
+      case NK.VAR:
+        return this.getVar(n.str, n.line);
+      case NK.INDEX:
+        return this.evalIndex(n);
+      case NK.ARRLIT:
+        return this.evalArrLit(n);
+      case NK.INPUT:
+        return this.evalInput(n);
+      case NK.NEG: {
+        const v = this.evalExpr(n.a!);
+        if (hasError) return nilVal();
+        if (v.kind != VK.NUM) {
+          fail("数値ではありません", n.line);
+          return nilVal();
+        }
+        return numVal(-v.num);
+      }
+      case NK.BINOP:
+        return this.evalBinop(n);
+      case NK.CMP:
+        return this.evalCmp(n);
+      case NK.AND: {
+        const l = this.evalExpr(n.a!);
+        if (hasError) return nilVal();
+        const r = this.evalExpr(n.b!);
+        if (hasError) return nilVal();
+        return boolVal(isTruthy(l) && isTruthy(r));
+      }
+      case NK.OR: {
+        const l = this.evalExpr(n.a!);
+        if (hasError) return nilVal();
+        const r = this.evalExpr(n.b!);
+        if (hasError) return nilVal();
+        return boolVal(isTruthy(l) || isTruthy(r));
+      }
+      case NK.NOT: {
+        const v = this.evalExpr(n.a!);
+        if (hasError) return nilVal();
+        return boolVal(!isTruthy(v));
+      }
+      case NK.CALL:
+        return this.evalCall(n);
+      default:
+        fail("不明な式です", n.line);
+        return nilVal();
+    }
+  }
+
+  evalIndex(n: Node): Value {
+    const name = n.str;
+    const indices = n.list!;
+    let container = this.getVar(name, n.line);
+    if (hasError) return nilVal();
+    for (let i = 0; i < indices.length; i++) {
+      const idxVal = this.evalExpr(indices[i]);
+      if (hasError) return nilVal();
+      if (idxVal.kind != VK.NUM) {
+        fail("添字は数値である必要があります", n.line);
+        return nilVal();
+      }
+      if (container.kind != VK.ARR || container.arr == null) {
+        fail("配列ではありません: " + name, n.line);
+        return nilVal();
+      }
+      const a = container.arr!;
+      const idx = <i32>Math.round(idxVal.num);
+      if (idx < 0 || idx >= a.length) {
+        fail("添字が範囲外です", n.line);
+        return nilVal();
+      }
+      container = a[idx];
+    }
+    return container;
+  }
+
+  evalArrLit(n: Node): Value {
+    const elems = n.list!;
+    const vals: Value[] = [];
+    for (let i = 0; i < elems.length; i++) {
+      const v = this.evalExpr(elems[i]);
+      if (hasError) return nilVal();
+      vals.push(v);
+    }
+    return arrVal(vals);
+  }
+
+  evalInput(n: Node): Value {
+    if (!hostHasInput()) {
+      fail("外部入力がありません", n.line);
+      return nilVal();
+    }
+    const s = hostInput();
+    if (s.length > 0) {
+      const f = parseFloat(s);
+      if (!isNaN(f)) return numVal(f);
+    }
+    return strVal(s);
+  }
+
+  evalBinop(n: Node): Value {
+    const l = this.evalExpr(n.a!);
+    if (hasError) return nilVal();
+    const r = this.evalExpr(n.b!);
+    if (hasError) return nilVal();
+    if (l.kind != VK.NUM || r.kind != VK.NUM) {
+      fail("数値演算が必要です", n.line);
+      return nilVal();
+    }
+    const op = n.str;
+    if (op == "+") return numVal(l.num + r.num);
+    if (op == "-") return numVal(l.num - r.num);
+    if (op == "*") return numVal(l.num * r.num);
+    if (op == "/") return numVal(l.num / r.num);
+    if (op == "div") {
+      if (r.num == 0) {
+        fail("ゼロ除算です", n.line);
+        return nilVal();
+      }
+      return numVal(Math.floor(l.num / r.num));
+    }
+    if (op == "mod") {
+      if (r.num == 0) {
+        fail("ゼロ除算です", n.line);
+        return nilVal();
+      }
+      return numVal(l.num - Math.floor(l.num / r.num) * r.num);
+    }
+    fail("不明な演算子です: " + op, n.line);
+    return nilVal();
+  }
+
+  evalCmp(n: Node): Value {
+    const l = this.evalExpr(n.a!);
+    if (hasError) return nilVal();
+    const r = this.evalExpr(n.b!);
+    if (hasError) return nilVal();
+    const op = n.str;
+    let cmp: i32 = 0;
+    if (l.kind == VK.NUM && r.kind == VK.NUM) {
+      cmp = l.num < r.num ? -1 : l.num > r.num ? 1 : 0;
+    } else if (l.kind == VK.STR && r.kind == VK.STR) {
+      cmp = l.str < r.str ? -1 : l.str > r.str ? 1 : 0;
+    } else if (l.kind == VK.BOOL && r.kind == VK.BOOL) {
+      cmp = l.num < r.num ? -1 : l.num > r.num ? 1 : 0;
+    } else {
+      fail("比較できない値の組み合わせです", n.line);
+      return nilVal();
+    }
+    if (op == "=") return boolVal(cmp == 0);
+    if (op == "!=") return boolVal(cmp != 0);
+    if (op == ">") return boolVal(cmp > 0);
+    if (op == ">=") return boolVal(cmp >= 0);
+    if (op == "<") return boolVal(cmp < 0);
+    if (op == "<=") return boolVal(cmp <= 0);
+    fail("不明な比較演算子です: " + op, n.line);
+    return nilVal();
+  }
+
+  evalCall(n: Node): Value {
+    const name = n.str;
+    const argNodes = n.list!;
+    const args: Value[] = [];
+    for (let i = 0; i < argNodes.length; i++) {
+      const v = this.evalExpr(argNodes[i]);
+      if (hasError) return nilVal();
+      args.push(v);
+    }
+    if (this.funcs.has(name)) return this.callUserFunc(name, args, n.line);
+    return this.callBuiltin(name, args, n.line);
+  }
+
+  // 関数の戻り値は、関数名と同名のローカル変数に代入された値とする
+  // （原文に明示のRETURN構文がないため、関数名を戻り値の器として使う慣例に基づく）
+  callUserFunc(name: string, args: Value[], line: i32): Value {
+    if (this.callStack.length > 800) {
+      fail("再帰が深すぎます", line);
+      return nilVal();
+    }
+    const def = this.funcs.get(name);
+    const params = def.params!;
+    const scope = new Map<string, Value>();
+    for (let i = 0; i < params.length; i++) {
+      scope.set(params[i], i < args.length ? args[i] : nilVal());
+    }
+    this.callStack.push(scope);
+    this.execBlock(def.list!);
+    const result = scope.has(name) ? scope.get(name) : nilVal();
+    this.callStack.pop();
+    return result;
+  }
+
+  callBuiltin(name: string, args: Value[], line: i32): Value {
+    if (name == "二乗") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 二乗", line);
+        return nilVal();
+      }
+      return numVal(args[0].num * args[0].num);
+    }
+    if (name == "べき乗") {
+      if (args.length < 2 || args[0].kind != VK.NUM || args[1].kind != VK.NUM) {
+        fail("引数が不正です: べき乗", line);
+        return nilVal();
+      }
+      return numVal(Math.pow(args[0].num, args[1].num));
+    }
+    if (name == "乱数") {
+      if (args.length < 2 || args[0].kind != VK.NUM || args[1].kind != VK.NUM) {
+        fail("引数が不正です: 乱数", line);
+        return nilVal();
+      }
+      const lo = Math.min(args[0].num, args[1].num);
+      const hi = Math.max(args[0].num, args[1].num);
+      return numVal(lo + Math.floor(Math.random() * (hi - lo + 1)));
+    }
+    if (name == "奇数") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 奇数", line);
+        return nilVal();
+      }
+      const iv = i64(Math.round(args[0].num));
+      return boolVal((iv % 2 as i64) != 0);
+    }
+    if (name == "二進で表示する") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 二進で表示する", line);
+        return nilVal();
+      }
+      hostPrint(toBinaryString(i64(Math.round(args[0].num))) + "\n");
+      return nilVal();
+    }
+    fail("未定義の関数です: " + name, line);
+    return nilVal();
+  }
+}
+
+export function runProgram(stmts: Node[]): void {
+  const interp = new Interpreter();
+  interp.runProgram(stmts);
+}
