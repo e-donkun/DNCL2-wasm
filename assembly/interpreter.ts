@@ -155,9 +155,6 @@ export class Interpreter {
       case NK.INCDEC:
         this.execIncDec(n);
         return;
-      case NK.DISPLAY:
-        this.execDisplay(n);
-        return;
       case NK.EXPR_STMT:
         this.evalExpr(n.a!);
         return;
@@ -259,17 +256,6 @@ export class Interpreter {
       return;
     }
     this.setVar(target.str, numVal(n.flag ? cur.num + amt.num : cur.num - amt.num));
-  }
-
-  execDisplay(n: Node): void {
-    const list = n.list!;
-    let s = "";
-    for (let i = 0; i < list.length; i++) {
-      const v = this.evalExpr(list[i]);
-      if (hasError) return;
-      s += valueToDisplayString(v);
-    }
-    hostPrint(s + "\n");
   }
 
   execIf(n: Node): void {
@@ -469,15 +455,20 @@ export class Interpreter {
     if (hasError) return nilVal();
     const r = this.evalExpr(n.b!);
     if (hasError) return nilVal();
+    const op = n.str;
+    // 新仕様: 文字列は "+" で連結できる（DNCL_SPEC_SUMMARY.md 2節）
+    if (op == "+" && l.kind == VK.STR && r.kind == VK.STR) {
+      return strVal(l.str + r.str);
+    }
     if (l.kind != VK.NUM || r.kind != VK.NUM) {
       fail("数値演算が必要です", n.line);
       return nilVal();
     }
-    const op = n.str;
     if (op == "+") return numVal(l.num + r.num);
     if (op == "-") return numVal(l.num - r.num);
     if (op == "*") return numVal(l.num * r.num);
     if (op == "/") return numVal(l.num / r.num);
+    if (op == "**") return numVal(Math.pow(l.num, r.num));
     if (op == "div") {
       if (r.num == 0) {
         fail("ゼロ除算です", n.line);
@@ -513,7 +504,7 @@ export class Interpreter {
       fail("比較できない値の組み合わせです", n.line);
       return nilVal();
     }
-    if (op == "=") return boolVal(cmp == 0);
+    if (op == "==") return boolVal(cmp == 0);
     if (op == "!=") return boolVal(cmp != 0);
     if (op == ">") return boolVal(cmp > 0);
     if (op == ">=") return boolVal(cmp >= 0);
@@ -557,6 +548,45 @@ export class Interpreter {
   }
 
   callBuiltin(name: string, args: Value[], line: i32): Value {
+    // 新仕様: 表示する(式, 式, ...) はカンマ区切りで連結して1行出力する（DNCL_SPEC_SUMMARY.md 7節）
+    if (name == "表示する") {
+      let s = "";
+      for (let i = 0; i < args.length; i++) s += valueToDisplayString(args[i]);
+      hostPrint(s + "\n");
+      return nilVal();
+    }
+    // 新仕様: 要素数(配列) は配列の要素数を返す
+    if (name == "要素数") {
+      if (args.length < 1 || args[0].kind != VK.ARR || args[0].arr == null) {
+        fail("引数が不正です: 要素数", line);
+        return nilVal();
+      }
+      return numVal(args[0].arr!.length);
+    }
+    // 新仕様: 整数(x) は0方向への切り捨て（Pythonのint()相当）
+    if (name == "整数") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 整数", line);
+        return nilVal();
+      }
+      const v = args[0].num;
+      return numVal(v >= 0 ? Math.floor(v) : Math.ceil(v));
+    }
+    // 新仕様: 乱数() は0以上1未満の実数乱数を返す
+    // 旧仕様: 乱数(m,n) はm以上n以下の整数乱数を返す（後方互換のため引数2個の場合に踏襲）
+    if (name == "乱数") {
+      if (args.length == 0) {
+        return numVal(Math.random());
+      }
+      if (args.length == 2 && args[0].kind == VK.NUM && args[1].kind == VK.NUM) {
+        const lo = Math.min(args[0].num, args[1].num);
+        const hi = Math.max(args[0].num, args[1].num);
+        return numVal(lo + Math.floor(Math.random() * (hi - lo + 1)));
+      }
+      fail("引数が不正です: 乱数", line);
+      return nilVal();
+    }
+    // 以下は旧仕様の組み込み関数。新仕様には記載がないが、後方互換のため残す
     if (name == "二乗") {
       if (args.length < 1 || args[0].kind != VK.NUM) {
         fail("引数が不正です: 二乗", line);
@@ -570,15 +600,6 @@ export class Interpreter {
         return nilVal();
       }
       return numVal(Math.pow(args[0].num, args[1].num));
-    }
-    if (name == "乱数") {
-      if (args.length < 2 || args[0].kind != VK.NUM || args[1].kind != VK.NUM) {
-        fail("引数が不正です: 乱数", line);
-        return nilVal();
-      }
-      const lo = Math.min(args[0].num, args[1].num);
-      const hi = Math.max(args[0].num, args[1].num);
-      return numVal(lo + Math.floor(Math.random() * (hi - lo + 1)));
     }
     if (name == "奇数") {
       if (args.length < 1 || args[0].kind != VK.NUM) {
