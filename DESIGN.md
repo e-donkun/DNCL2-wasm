@@ -132,6 +132,77 @@ IDENT直後に現れた `[` は添字アクセス" という位置による判�
 `parseIfChain` の各所で「新仕様の語形か旧仕様の語形か」をWORDトークンのテキストで
 分岐することで両立させている。
 
+## Python3準拠セクション（未定義挙動の実装方針）
+
+DNCL原文に定義のない挙動はPython3の対応する関数・演算子の挙動を参考にする方針とした
+（`assembly/interpreter.ts`）:
+
+- `isTruthy()`: 数値・真偽値は0以外が真、**文字列・配列も長さで判定**（空なら偽）。
+  Pythonの`bool()`と同じ。
+- `AND`/`OR`ノードの評価は**短絡評価**（右辺に副作用があっても左辺で結果が決まれば
+  評価しない）。Pythonの`and`/`or`と同じ。
+- 算術演算子`/`のゼロ除算は`fail()`でエラーにする。Pythonの`ZeroDivisionError`相当
+  （`÷`/`%`は元からエラーにしていた）。
+- `evalIndex()`は配列だけでなく文字列にも添字アクセスでき、1文字の文字列を返す。
+  Pythonの文字列インデックスに相当。
+- `要素数()`は配列の要素数に加え文字列の文字数も返せる（Pythonの`len()`相当）。
+- `整数()`は数値だけでなく文字列も受け付け、`parseFloat`してから切り捨てる
+  （Pythonの`int(str)`相当。変換できなければエラー）。
+
+## インタラクティブな【外部からの入力】（Pythonの`input()`風UX）
+
+`dist/index.html`のコンソールは、WASMのrunProgram()が完全に同期実行であるにも
+かかわらず、Pythonの`input()`のように出力欄にその場でプロンプト（入力欄）を出して
+入力を受け付ける。仕組みは「リプレイ方式」:
+
+```
+run()を押す:
+  answeredInputs = []            // このセッションで確定した回答（順番に消費される）
+  runSeed = 新しいランダムなシード   // 乱数()の決定性を保つため、以降のラウンドで使い回す
+  executeRound()
+
+executeRound():
+  roundOutput = ""                // 今回のラウンドで生成された全出力
+  inputCallIndex = 0
+  wasm.seedRandom(runSeed)
+  try:
+    wasm.runProgram(src)          // hostPrintはroundOutputに追記するだけ（DOM未反映）
+  catch NeedInputSignal:
+    needInput = true              // hostInput()がanswered分を使い切って例外を投げた
+  flushNewOutput()                 // roundOutputの「前回まで表示済みの続き」だけをDOMに追記
+  もし needInput なら:
+    showInlinePrompt()             // 出力欄末尾にinline <input> を表示してfocus
+    // Enter押下時: 入力値をanswerとしてechoし、answeredInputsに追加してexecuteRound()を再実行
+  それ以外なら:
+    完了（Run有効化）
+```
+
+`hostInput()`は「まだ答えていない呼び出し」に達したら値を返す代わりに
+`NeedInputSignal`を`throw`し、AssemblyScript側の呼び出しスタックごと
+`runProgram()`の外（JSの`try/catch`）まで巻き戻す。これにより新しい回答を
+1つ手に入れるたびに**プログラム全体を最初から再実行**することになるが、
+`answeredInputs`にある呼び出しは即座に値が返るため、ユーザーからは
+「入力するたびに続きが実行される」ように見える。
+
+この方式では実行が決定的である必要がある（同じ回答を与えれば同じところまで
+同じ出力になる）。唯一の非決定的要素である`乱数()`は、`assembly/interpreter.ts`に
+実装したシード可能なPRNG（mulberry32）を使い、1回の実行セッション中（＝同じ
+`runSeed`を使う間）は同じ乱数列を返すことで決定性を保っている。
+`assembly/index.ts`が`seedRandom(seed: u32)`をエクスポートし、HTML側が
+各ラウンドの開始時に同じシードで呼び直す。
+
+## エディタUI（行番号・インデントガイド）
+
+`dist/index.html`の`#src`テキストエリアには以下を追加した:
+
+- **行番号ガター**: `#lineNumbers`という別divを`#src`の左に並べ、`input`イベントで
+  行数を再計算し、`scroll`イベントで`scrollTop`を同期する素朴な実装。
+- **インデントガイド**: `#src`の`background-image`に`repeating-linear-gradient`で
+  4文字ごとに縦線を敷き、`background-origin: content-box; background-attachment: local;`
+  でテキストのスクロールに追従させる。実際のインデント構造（INDENT/DEDENTの深さ）を
+  厳密に反映するものではなく、等幅フォント上で目安として機能する簡易的な実装である。
+- Tabキー押下でスペース4つを挿入するショートカットも追加。
+
 ## 0. 全体アーキテクチャ
 
 ```

@@ -28,6 +28,10 @@ i を 0 から 4 まで 1 ずつ増やしながら繰り返す:
 a = (1 == 1)
 b = (1 == 2)
 表示する("a or b and (not b) = ", a or b and (not b))
+
+# 外部からの入力（Pythonのinput()のように、この場でその場で入力できます）
+namae =【外部からの入力】
+表示する("こんにちは、", namae, "さん")
 `;
 
 const html = `<!DOCTYPE html>
@@ -50,6 +54,8 @@ const html = `<!DOCTYPE html>
     --console-text: #d4d4d4;
     --error-bg: #fdecea;
     --error-text: #b3261e;
+    --indent-guide: rgba(0, 0, 0, 0.08);
+    --gutter-bg: #f0f0f2;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -62,6 +68,8 @@ const html = `<!DOCTYPE html>
       --console-text: #d4d4d4;
       --error-bg: #3a1f1d;
       --error-text: #ff6b60;
+      --indent-guide: rgba(255, 255, 255, 0.09);
+      --gutter-bg: #232325;
     }
   }
   * { box-sizing: border-box; }
@@ -101,20 +109,56 @@ const html = `<!DOCTYPE html>
     font-size: 0.95rem;
     margin: 0 0 8px;
   }
-  textarea {
-    width: 100%;
-    box-sizing: border-box;
+  .code-mono {
     font-family: "SF Mono", Menlo, Consolas, monospace;
     font-size: 0.85rem;
-    border-radius: 8px;
+    line-height: 1.5;
+    tab-size: 4;
+  }
+  /* ---- ソースコードエディタ（行番号ガター + インデントガイド） ---- */
+  .editor {
+    display: flex;
+    align-items: stretch;
     border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    height: 340px;
+  }
+  .line-numbers {
+    flex: 0 0 auto;
+    padding: 8px 6px 8px 8px;
+    text-align: right;
+    color: var(--muted);
+    background: var(--gutter-bg);
+    overflow: hidden;
+    white-space: pre;
+    user-select: none;
+  }
+  #src {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border: none;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
     background: var(--panel-bg);
     color: var(--text);
     padding: 8px;
-    resize: vertical;
+    resize: none;
+    white-space: pre;
+    overflow: auto;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--indent-guide) 0,
+      var(--indent-guide) 1px,
+      transparent 1px,
+      transparent 4ch
+    );
+    background-origin: content-box;
+    background-attachment: local;
   }
-  #src { height: 320px; }
-  #inputQueue { height: 80px; }
+  #src:focus { outline: none; }
   .buttons {
     display: flex;
     flex-wrap: wrap;
@@ -136,6 +180,7 @@ const html = `<!DOCTYPE html>
     border-color: var(--accent);
   }
   button:hover { filter: brightness(0.95); }
+  button:disabled { opacity: 0.5; cursor: default; }
   #output {
     background: var(--console-bg);
     color: var(--console-text);
@@ -148,6 +193,19 @@ const html = `<!DOCTYPE html>
     word-break: break-word;
     border-radius: 8px;
     padding: 10px;
+  }
+  .inline-input {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--console-text);
+    color: var(--console-text);
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+    min-width: 4ch;
+    width: 16ch;
+    max-width: 100%;
+    padding: 0 2px;
   }
   #errorBox {
     display: none;
@@ -182,19 +240,23 @@ const html = `<!DOCTYPE html>
 <div class="layout">
   <div class="panel">
     <h2>ソースコード</h2>
-    <textarea id="src" spellcheck="false"></textarea>
+    <div class="editor">
+      <div id="lineNumbers" class="line-numbers code-mono">1</div>
+      <textarea id="src" class="code-mono" spellcheck="false"></textarea>
+    </div>
     <div class="buttons">
       <button class="primary" id="runBtn">実行</button>
       <button id="clearOutputBtn">出力をクリア</button>
       <button id="showTokensBtn">トークン一覧を表示</button>
     </div>
-    <h2>外部からの入力（【外部からの入力】用・1行1値）</h2>
-    <textarea id="inputQueue" spellcheck="false" placeholder="1行に1つずつ値を入力してください"></textarea>
-    <p class="hint"># から行末まではコメントとして無視されます。全角・半角の記号どちらも使用できます。</p>
+    <p class="hint">
+      # から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。
+      【外部からの入力】に到達すると、右側の出力欄にその場で入力欄が表示されます（Pythonのinput()と同様）。
+    </p>
   </div>
   <div class="panel">
     <h2>出力</h2>
-    <div id="output"></div>
+    <div id="output" class="code-mono"></div>
     <div id="errorBox"></div>
     <div id="tokenPanel">
       <h2>トークン一覧</h2>
@@ -251,20 +313,36 @@ function getString(ptr) {
   return s;
 }
 
+// ==== インタラクティブな【外部からの入力】（Pythonのinput()風のUX） ====
+//
+// WASM側のrunProgram()は完全に同期実行であり、実行を途中で一時停止して
+// 「ユーザーが出力欄に入力し終えるまで待つ」ことはできない。そこで、
+// 「まだ答えていない入力が必要になったら、そこで例外を投げて実行全体を中断し、
+// ユーザーが入力欄で入力してEnterを押したら、既に得られた回答をすべて
+// 使い回しながら最初から実行し直す」というリプレイ方式で対話的な入力を実現する。
+// 同じ回答を使う限りプログラムは決定的に同じところまで再現されるはずだが、
+// 乱数()だけは例外なので、1回の実行セッション中は同じ乱数シードを使い回すことで
+// 再実行のたびに結果が変わらないようにしている（assembly/interpreter.ts参照）。
+class NeedInputSignal {}
+
+let sourceCode = "";
+let answeredInputs = [];
+let inputCallIndex = 0;
+let runSeed = 0;
+let roundOutput = "";
+let flushedLength = 0;
+
 // ==== ホスト実装（DESIGN.md 5.4節） ====
-let currentInputQueue = [];
-let outputEl, errorBoxEl;
+let outputEl, errorBoxEl, runBtnEl;
 
 function hostPrintImpl(ptr) {
-  outputEl.append(document.createTextNode(getString(ptr)));
-  outputEl.scrollTop = outputEl.scrollHeight;
-}
-function hostHasInputImpl() {
-  return currentInputQueue.length > 0;
+  roundOutput += getString(ptr);
 }
 function hostInputImpl() {
-  const v = currentInputQueue.length > 0 ? currentInputQueue.shift() : "";
-  return newString(v);
+  if (inputCallIndex < answeredInputs.length) {
+    return newString(answeredInputs[inputCallIndex++]);
+  }
+  throw new NeedInputSignal();
 }
 function hostErrorImpl(ptr) {
   errorBoxEl.textContent = getString(ptr);
@@ -274,7 +352,7 @@ function hostErrorImpl(ptr) {
 const TT_NAMES = [
   "NUMBER", "STRING", "IDENT", "WORD", "NEWLINE",
   "LPAREN", "RPAREN", "LBRACKET", "RBRACKET", "LBRACE", "RBRACE",
-  "LINPUT", "RINPUT", "COMMA", "ARROW",
+  "LINPUT", "RINPUT", "COMMA", "ASSIGN",
   "PLUS", "MINUS", "MUL", "DIV", "IDIV", "MOD",
   "EQ", "NEQ", "GT", "GE", "LT", "LE",
   "POW", "COLON", "INDENT", "DEDENT", "EOF"
@@ -289,7 +367,6 @@ async function initWasm() {
       },
       seed() { return Date.now(); },
       hostPrint: (ptr) => hostPrintImpl(ptr),
-      hostHasInput: () => hostHasInputImpl(),
       hostInput: () => hostInputImpl(),
       hostError: (ptr) => hostErrorImpl(ptr)
     }
@@ -300,18 +377,74 @@ async function initWasm() {
   wasmExports = instance.exports;
 }
 
+function setRunning(isRunning) {
+  runBtnEl.disabled = isRunning;
+}
+
+function flushNewOutput() {
+  const newText = roundOutput.slice(flushedLength);
+  flushedLength = roundOutput.length;
+  if (newText.length > 0) {
+    outputEl.appendChild(document.createTextNode(newText));
+    outputEl.scrollTop = outputEl.scrollHeight;
+  }
+}
+
 function run() {
-  const src = document.getElementById("src").value;
+  sourceCode = document.getElementById("src").value;
   outputEl.textContent = "";
   errorBoxEl.style.display = "none";
   errorBoxEl.textContent = "";
-  currentInputQueue = document.getElementById("inputQueue").value.split("\\n").filter((s) => s.length > 0);
+  answeredInputs = [];
+  flushedLength = 0;
+  runSeed = (Math.random() * 0xffffffff) >>> 0;
+  setRunning(true);
+  executeRound();
+}
+
+function executeRound() {
+  roundOutput = "";
+  inputCallIndex = 0;
+  wasmExports.seedRandom(runSeed);
+  let needInput = false;
   try {
-    wasmExports.runProgram(newString(src));
+    wasmExports.runProgram(newString(sourceCode));
   } catch (e) {
-    errorBoxEl.textContent = "内部エラー: " + (e && e.message ? e.message : String(e));
-    errorBoxEl.style.display = "block";
+    if (e instanceof NeedInputSignal) {
+      needInput = true;
+    } else {
+      flushNewOutput();
+      errorBoxEl.textContent = "内部エラー: " + (e && e.message ? e.message : String(e));
+      errorBoxEl.style.display = "block";
+      setRunning(false);
+      return;
+    }
   }
+  flushNewOutput();
+  if (needInput) {
+    showInlinePrompt();
+  } else {
+    setRunning(false);
+  }
+}
+
+function showInlinePrompt() {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-input";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  outputEl.appendChild(input);
+  outputEl.scrollTop = outputEl.scrollHeight;
+  input.focus();
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    const value = input.value;
+    outputEl.replaceChild(document.createTextNode(value + "\\n"), input);
+    answeredInputs.push(value);
+    executeRound();
+  });
 }
 
 function showTokens() {
@@ -338,11 +471,40 @@ function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// ==== エディタの行番号ガター ====
+function updateLineNumbers() {
+  const src = document.getElementById("src");
+  const lineNumbersEl = document.getElementById("lineNumbers");
+  const lineCount = src.value.split("\\n").length;
+  const lines = new Array(lineCount);
+  for (let i = 0; i < lineCount; i++) lines[i] = i + 1;
+  lineNumbersEl.textContent = lines.join("\\n");
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   outputEl = document.getElementById("output");
   errorBoxEl = document.getElementById("errorBox");
-  document.getElementById("src").value = ${JSON.stringify(SAMPLE_PROGRAM)};
-  document.getElementById("runBtn").addEventListener("click", run);
+  runBtnEl = document.getElementById("runBtn");
+  const srcEl = document.getElementById("src");
+  const lineNumbersEl = document.getElementById("lineNumbers");
+
+  srcEl.value = ${JSON.stringify(SAMPLE_PROGRAM)};
+  updateLineNumbers();
+  srcEl.addEventListener("input", updateLineNumbers);
+  srcEl.addEventListener("scroll", () => {
+    lineNumbersEl.scrollTop = srcEl.scrollTop;
+  });
+  // タブキーでインデント（半角スペース4個）を挿入できるようにする
+  srcEl.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Tab") return;
+    ev.preventDefault();
+    const start = srcEl.selectionStart;
+    const end = srcEl.selectionEnd;
+    srcEl.setRangeText("    ", start, end, "end");
+    updateLineNumbers();
+  });
+
+  runBtnEl.addEventListener("click", run);
   document.getElementById("clearOutputBtn").addEventListener("click", () => {
     outputEl.textContent = "";
     errorBoxEl.style.display = "none";
