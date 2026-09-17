@@ -45,4 +45,17 @@ npm run build:html    # build/dncl.wasm を埋め込んだ dist/index.html を�
 `dist/index.html` をブラウザで開くとDNCLプログラムをその場で実行できます
 （外部URLへのfetchは一切行いません）。
 
+## GitHub Pagesでの公開
+
+`docs/index.html` をGitHub Pagesで公開しています。
+
+初回のみ、リポジトリの **Settings → Pages → Build and deployment → Source** を
+`Deploy from a branch` にし、ブランチを `main` / `docs` に設定してください
+（この1回だけは手動操作が必要です）。設定後は
+`https://e-donkun.github.io/DNCL-wasm/` で公開されます。
+
+**更新時の注意**: `docs/index.html` は静的なコピーなので、`assembly/`やUIを変更したら
+`npm run build && npm run build:html && cp dist/index.html docs/index.html` を実行し、
+`docs/index.html` の差分もコミットしてください（自動デプロイではありません）。
+
 `CONTINUE_PROMPT.md` に、Claude Codeへそのまま渡せる依頼文の例を用意しています。
