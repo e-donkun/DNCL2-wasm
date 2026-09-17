@@ -22,7 +22,7 @@ AssemblyScriptでWebAssemblyにコンパイルして、ブラウザのコンソ�
   プログラムをそのまま検証、旧仕様の後方互換・Python準拠ケースも含め全21ケースがパス）
 - ✅ `npx asc assembly/index.ts --target release` のビルド確認（debug/releaseとも）
 - ✅ `dist/index.html` — 単一HTMLファイル（外部fetchなし、コンソールUI付き）。
-  行番号ガター・インデントガイド付きエディタと、Pythonの`input()`のように
+  行番号ガター付きエディタと、Pythonの`input()`のように
   出力欄にその場で入力欄を表示するインタラクティブな外部入力を実装。
   ソースコードを生Deflate圧縮+base64urlエンコードしてURLの`#`以降に埋め込む
   共有URL・QRコード生成機能も搭載（`vendor/qrcode-generator.js`を使用）。
