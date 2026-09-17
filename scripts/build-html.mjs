@@ -12,8 +12,7 @@ const outPath = path.join(outDir, "index.html");
 const wasmBase64 = readFileSync(wasmPath).toString("base64");
 const qrcodeLibJs = readFileSync(path.join(rootDir, "vendor", "qrcode-generator.js"), "utf-8");
 
-const SAMPLE_PROGRAM = `# 共通テスト用プログラム表記（2022年11月改訂・新仕様）の例
-# 配列から最大値を探す
+const SAMPLE_PROGRAM = `# 配列から最大値を探す
 Data = [3, 7, 2, 9, 4]
 saidai = Data[0]
 i を 0 から 4 まで 1 ずつ増やしながら繰り返す:

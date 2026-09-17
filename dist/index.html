@@ -2881,7 +2881,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       console.error("Failed to restore source code from URL", e);
     }
   }
-  srcEl.value = initialSource !== null ? initialSource : "# 共通テスト用プログラム表記（2022年11月改訂・新仕様）の例\n# 配列から最大値を探す\nData = [3, 7, 2, 9, 4]\nsaidai = Data[0]\ni を 0 から 4 まで 1 ずつ増やしながら繰り返す:\n    もし Data[i] > saidai ならば:\n        saidai = Data[i]\n表示する(\"saidai = \", saidai)\n\n# べき乗演算子と整数への切り捨て\n表示する(\"2 ** 10 = \", 2 ** 10)\n表示する(\"整数(3.9) = \", 整数(3.9))\n\n# 論理演算子 and/or/not（優先順位は not > and > or）\na = (1 == 1)\nb = (1 == 2)\n表示する(\"a or b and (not b) = \", a or b and (not b))\n\n# 外部からの入力（Pythonのinput()のように、この場でその場で入力できます）\nnamae =【外部からの入力】\n表示する(\"こんにちは、\", namae, \"さん\")\n";
+  srcEl.value = initialSource !== null ? initialSource : "# 配列から最大値を探す\nData = [3, 7, 2, 9, 4]\nsaidai = Data[0]\ni を 0 から 4 まで 1 ずつ増やしながら繰り返す:\n    もし Data[i] > saidai ならば:\n        saidai = Data[i]\n表示する(\"saidai = \", saidai)\n\n# べき乗演算子と整数への切り捨て\n表示する(\"2 ** 10 = \", 2 ** 10)\n表示する(\"整数(3.9) = \", 整数(3.9))\n\n# 論理演算子 and/or/not（優先順位は not > and > or）\na = (1 == 1)\nb = (1 == 2)\n表示する(\"a or b and (not b) = \", a or b and (not b))\n\n# 外部からの入力（Pythonのinput()のように、この場でその場で入力できます）\nnamae =【外部からの入力】\n表示する(\"こんにちは、\", namae, \"さん\")\n";
   updateLineNumbers();
   srcEl.addEventListener("input", updateLineNumbers);
   srcEl.addEventListener("scroll", () => {
