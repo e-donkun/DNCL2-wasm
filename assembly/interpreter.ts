@@ -124,6 +124,10 @@ export class Interpreter {
   globals: Map<string, Value> = new Map();
   funcs: Map<string, Node> = new Map();
   callStack: Map<string, Value>[] = [];
+  // 配列（・文字列）添字の開始番号。0なら従来通り、1ならユーザーが書いた添字から
+  // 1を引いて内部の0始まり配列にアクセスする（ホスト側のプルダウンで切替可能。
+  // DESIGN.md「配列添字の開始番号」参照）
+  indexBase: i32 = 0;
 
   currentScope(): Map<string, Value> | null {
     const n = this.callStack.length;
@@ -216,7 +220,7 @@ export class Interpreter {
     }
   }
 
-  // 配列の添字は0始まりとして扱う
+  // 配列の添字はindexBase始まり（0または1。ホスト側のプルダウンで切替可能）
   assignIndex(target: Node, value: Value): void {
     const name = target.str;
     const indices = target.list!;
@@ -229,7 +233,7 @@ export class Interpreter {
         fail("配列ではありません: " + name, target.line);
         return;
       }
-      const idx = <i32>Math.round(idxVal.num);
+      const idx = <i32>Math.round(idxVal.num) - this.indexBase;
       const a = container.arr!;
       if (idx < 0 || idx >= a.length) {
         fail("添字が範囲外です", target.line);
@@ -243,7 +247,7 @@ export class Interpreter {
     }
     const lastIdxVal = this.evalExpr(indices[indices.length - 1]);
     if (hasError) return;
-    const lastIdx = <i32>Math.round(lastIdxVal.num);
+    const lastIdx = <i32>Math.round(lastIdxVal.num) - this.indexBase;
     const a = container.arr!;
     if (lastIdx < 0 || lastIdx >= a.length) {
       fail("添字が範囲外です", target.line);
@@ -439,7 +443,7 @@ export class Interpreter {
         fail("添字は数値である必要があります", n.line);
         return nilVal();
       }
-      const idx = <i32>Math.round(idxVal.num);
+      const idx = <i32>Math.round(idxVal.num) - this.indexBase;
       // Pythonの文字列インデックスに倣い、文字列への添字アクセスも1文字の文字列として扱う
       if (container.kind == VK.STR) {
         if (idx < 0 || idx >= container.str.length) {
@@ -730,7 +734,8 @@ export class Interpreter {
   }
 }
 
-export function runProgram(stmts: Node[]): void {
+export function runProgram(stmts: Node[], indexBase: i32 = 0): void {
   const interp = new Interpreter();
+  interp.indexBase = indexBase;
   interp.runProgram(stmts);
 }
