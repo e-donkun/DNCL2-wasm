@@ -720,6 +720,10 @@ const aboutHtml = `<!DOCTYPE html>
   }
   a { color: var(--accent); }
   .back { display: inline-block; margin-top: 1.5em; }
+  table.fn-table { width: 100%; border-collapse: collapse; margin-top: 0.5em; font-size: 0.92rem; }
+  table.fn-table th, table.fn-table td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.fn-table th { color: var(--muted); }
+  .fn-note { color: var(--muted); font-size: 0.85rem; margin-top: 0.75em; }
 </style>
 </head>
 <body>
@@ -729,6 +733,23 @@ const aboutHtml = `<!DOCTYPE html>
 
   <h2>コメント・ブロック構文</h2>
   <p><code>#</code> から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。</p>
+
+  <h2>利用できる関数</h2>
+  <table class="fn-table">
+    <thead><tr><th>関数</th><th>説明</th></tr></thead>
+    <tbody>
+      <tr><td><code>表示する(式, ...)</code></td><td>引数をすべて連結して1行出力します。</td></tr>
+      <tr><td><code>要素数(配列)</code></td><td>配列の要素数（文字列なら文字数）を返します。</td></tr>
+      <tr><td><code>整数(数値)</code></td><td>0方向への切り捨てを行います（Pythonの<code>int()</code>相当）。</td></tr>
+      <tr><td><code>乱数()</code></td><td>0以上1未満の実数の乱数を返します。</td></tr>
+      <tr><td><code>乱数(m, n)</code></td><td>m以上n以下の整数の乱数を返します（旧DNCL互換）。</td></tr>
+      <tr><td><code>二乗(x)</code></td><td>xの2乗を返します。</td></tr>
+      <tr><td><code>べき乗(m, n)</code></td><td>mのn乗を返します（<code>m ** n</code>と同じ）。</td></tr>
+      <tr><td><code>奇数(n)</code></td><td>nが奇数なら真を返します。</td></tr>
+      <tr><td><code>二進で表示する(n)</code></td><td>nを2進数で表示します（値は返しません）。</td></tr>
+    </tbody>
+  </table>
+  <p class="fn-note">このほか、算術演算子として <code>+ - * / ÷ % **</code>、比較演算子として <code>== != &gt; &gt;= &lt; &lt;=</code>、論理演算子として <code>and or not</code>（優先順位は <code>not &gt; and &gt; or</code>）が使えます。</p>
 
   <h2>外部からの入力</h2>
   <p><code>【外部からの入力】</code>に到達すると、出力欄にその場で入力欄が表示されます（Pythonの<code>input()</code>と同様です）。</p>
