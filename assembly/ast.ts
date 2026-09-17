@@ -102,8 +102,12 @@ export function mkArrLit(elems: Node[], line: i32): Node {
   return n;
 }
 
-export function mkInput(line: i32): Node {
-  return new Node(NK.INPUT, line);
+// prompt: 【と】の間に書かれた文字列。Pythonのinput(prompt)のプロンプトとして
+// ホスト側に渡す（DESIGN.md「対話的な入力」参照）
+export function mkInput(prompt: string, line: i32): Node {
+  const n = new Node(NK.INPUT, line);
+  n.str = prompt;
+  return n;
 }
 
 export function mkNeg(a: Node, line: i32): Node {

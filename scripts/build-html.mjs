@@ -196,6 +196,21 @@ const html = `<!DOCTYPE html>
     max-width: 100%;
     padding: 0 2px;
   }
+  .inline-submit {
+    margin-left: 4px;
+    padding: 0 8px;
+    height: 1.6em;
+    line-height: 1;
+    font-family: inherit;
+    font-size: inherit;
+    border-radius: 4px;
+    border: 1px solid var(--console-text);
+    background: transparent;
+    color: var(--console-text);
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .inline-submit:hover { background: var(--console-text); color: var(--console-bg); }
   #errorBox {
     display: none;
     margin-top: 8px;
@@ -427,7 +442,11 @@ async function showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl)
 // 同じ回答を使う限りプログラムは決定的に同じところまで再現されるはずだが、
 // 乱数()だけは例外なので、1回の実行セッション中は同じ乱数シードを使い回すことで
 // 再実行のたびに結果が変わらないようにしている（assembly/interpreter.ts参照）。
-class NeedInputSignal {}
+class NeedInputSignal {
+  constructor(prompt) {
+    this.prompt = prompt;
+  }
+}
 
 let sourceCode = "";
 let answeredInputs = [];
@@ -442,11 +461,11 @@ let outputEl, errorBoxEl, runBtnEl;
 function hostPrintImpl(ptr) {
   roundOutput += getString(ptr);
 }
-function hostInputImpl() {
+function hostInputImpl(promptPtr) {
   if (inputCallIndex < answeredInputs.length) {
     return newString(answeredInputs[inputCallIndex++]);
   }
-  throw new NeedInputSignal();
+  throw new NeedInputSignal(getString(promptPtr));
 }
 function hostErrorImpl(ptr) {
   errorBoxEl.textContent = getString(ptr);
@@ -471,7 +490,7 @@ async function initWasm() {
       },
       seed() { return Date.now(); },
       hostPrint: (ptr) => hostPrintImpl(ptr),
-      hostInput: () => hostInputImpl(),
+      hostInput: (promptPtr) => hostInputImpl(promptPtr),
       hostError: (ptr) => hostErrorImpl(ptr)
     }
   };
@@ -526,11 +545,13 @@ function executeRound() {
   inputCallIndex = 0;
   wasmExports.seedRandom(runSeed);
   let needInput = false;
+  let promptText = "";
   try {
     wasmExports.runProgram(newString(sourceCode));
   } catch (e) {
     if (e instanceof NeedInputSignal) {
       needInput = true;
+      promptText = e.prompt;
     } else {
       flushNewOutput();
       errorBoxEl.textContent = "内部エラー: " + (e && e.message ? e.message : String(e));
@@ -541,29 +562,46 @@ function executeRound() {
   }
   flushNewOutput();
   if (needInput) {
-    showInlinePrompt();
+    showInlinePrompt(promptText);
   } else {
     setRunning(false);
   }
 }
 
-function showInlinePrompt() {
+// Pythonのinput(prompt)と同様、【】内の文字列をプロンプトとして先に表示してから
+// 入力欄を出す。Enterキーに加えて[↵]ボタンでも入力を確定できるようにする。
+function showInlinePrompt(promptText) {
+  if (promptText) {
+    outputEl.appendChild(document.createTextNode(promptText));
+  }
   const input = document.createElement("input");
   input.type = "text";
   input.className = "inline-input";
   input.autocomplete = "off";
   input.spellcheck = false;
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "button";
+  submitBtn.className = "inline-submit";
+  submitBtn.textContent = "↵";
+  submitBtn.title = "入力を確定";
   outputEl.appendChild(input);
+  outputEl.appendChild(submitBtn);
   outputEl.scrollTop = outputEl.scrollHeight;
   input.focus();
+
+  function submit() {
+    const value = input.value;
+    outputEl.replaceChild(document.createTextNode(value + "\\n"), input);
+    outputEl.removeChild(submitBtn);
+    answeredInputs.push(value);
+    executeRound();
+  }
   input.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter") return;
     ev.preventDefault();
-    const value = input.value;
-    outputEl.replaceChild(document.createTextNode(value + "\\n"), input);
-    answeredInputs.push(value);
-    executeRound();
+    submit();
   });
+  submitBtn.addEventListener("click", submit);
 }
 
 function showTokens() {
@@ -720,6 +758,10 @@ const aboutHtml = `<!DOCTYPE html>
   }
   a { color: var(--accent); }
   .back { display: inline-block; margin-top: 1.5em; }
+  table.fn-table { width: 100%; border-collapse: collapse; margin-top: 0.5em; font-size: 0.92rem; }
+  table.fn-table th, table.fn-table td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.fn-table th { color: var(--muted); }
+  .fn-note { color: var(--muted); font-size: 0.85rem; margin-top: 0.75em; }
 </style>
 </head>
 <body>
@@ -730,8 +772,32 @@ const aboutHtml = `<!DOCTYPE html>
   <h2>コメント・ブロック構文</h2>
   <p><code>#</code> から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。</p>
 
+  <h2>利用できる関数</h2>
+  <table class="fn-table">
+    <thead><tr><th>関数</th><th>説明</th></tr></thead>
+    <tbody>
+      <tr><td><code>表示する(式, ...)</code></td><td>引数をすべて連結して1行出力します。</td></tr>
+      <tr><td><code>要素数(配列)</code></td><td>配列の要素数（文字列なら文字数）を返します。</td></tr>
+      <tr><td><code>整数(数値)</code></td><td>0方向への切り捨てを行います（Pythonの<code>int()</code>相当）。</td></tr>
+      <tr><td><code>乱数()</code></td><td>0以上1未満の実数の乱数を返します。</td></tr>
+      <tr><td><code>乱数(m, n)</code></td><td>m以上n以下の整数の乱数を返します（旧DNCL互換）。</td></tr>
+      <tr><td><code>最大値(x, y)</code></td><td>xとyのうち大きい方を返します。</td></tr>
+      <tr><td><code>最大値(配列)</code></td><td>配列の要素の中の最大値を返します。</td></tr>
+      <tr><td><code>最小値(x, y)</code></td><td>xとyのうち小さい方を返します。</td></tr>
+      <tr><td><code>最小値(配列)</code></td><td>配列の要素の中の最小値を返します。</td></tr>
+      <tr><td><code>切り上げ(数値)</code></td><td>小数点以下を切り上げます（Pythonの<code>math.ceil()</code>相当）。</td></tr>
+      <tr><td><code>切り捨て(数値)</code></td><td>小数点以下を切り捨てます（Pythonの<code>math.floor()</code>相当）。</td></tr>
+      <tr><td><code>四捨五入(数値)</code></td><td>小数点以下を四捨五入します。</td></tr>
+      <tr><td><code>二乗(x)</code></td><td>xの2乗を返します。</td></tr>
+      <tr><td><code>べき乗(m, n)</code></td><td>mのn乗を返します（<code>m ** n</code>と同じ）。</td></tr>
+      <tr><td><code>奇数(n)</code></td><td>nが奇数なら真を返します。</td></tr>
+      <tr><td><code>二進で表示する(n)</code></td><td>nを2進数で表示します（値は返しません）。</td></tr>
+    </tbody>
+  </table>
+  <p class="fn-note">このほか、算術演算子として <code>+ - * / ÷ % **</code>、比較演算子として <code>== != &gt; &gt;= &lt; &lt;=</code>、論理演算子として <code>and or not</code>（優先順位は <code>not &gt; and &gt; or</code>）が使えます。</p>
+
   <h2>外部からの入力</h2>
-  <p><code>【外部からの入力】</code>に到達すると、出力欄にその場で入力欄が表示されます（Pythonの<code>input()</code>と同様です）。</p>
+  <p><code>【 】</code>がPythonの<code>input()</code>にあたり、<code>【 】</code>内に書いた文字列はプロンプトとして扱われます。<code>【外部からの入力】</code>に到達すると、まずそのプロンプト文字列が出力欄に表示され、続けてその場に入力欄と<code>[↵]</code>ボタンが表示されます。値を入力してEnterキーを押すか<code>[↵]</code>ボタンをクリックすると、入力が確定して実行が続きます。</p>
 
   <h2>共有URL・QRコード</h2>
   <p>「共有URL/QRコードを作成」で、今のソースコードをURLの<code>#</code>以降に埋め込んだリンクとQRコードを作成できます。そのURLを開くとソースコードが復元された状態で開きます。</p>
