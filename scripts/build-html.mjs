@@ -248,6 +248,7 @@ const html = `<!DOCTYPE html>
   table.tokens th { color: var(--muted); }
   .hint { color: var(--muted); font-size: 0.78rem; margin-top: 6px; }
   footer { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 20px; }
+  footer a { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -290,7 +291,7 @@ const html = `<!DOCTYPE html>
     </div>
   </div>
 </div>
-<footer>DNCL2実行環境（AssemblyScriptでビルド、単一HTMLファイル・外部fetchなし）</footer>
+<footer>Copyright (c) 2026 <a href="https://github.com/e-donkun">Jun Suzuki</a></footer>
 <script>
 // ==== QRコード生成ライブラリ（vendor/qrcode-generator.js。MIT, Copyright (c) 2009 Kazuhiko Arase） ====
 ${qrcodeLibJs}
