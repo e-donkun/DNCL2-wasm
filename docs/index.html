@@ -226,7 +226,6 @@
     </div>
     <div class="buttons">
       <button class="primary" id="runBtn">実行</button>
-      <button id="clearOutputBtn">出力をクリア</button>
       <button id="showTokensBtn" hidden>トークン一覧を表示</button>
       <button id="shareBtn">共有URL/QRコードを作成</button>
     </div>
@@ -242,6 +241,9 @@
   <div class="panel">
     <h2>出力</h2>
     <div id="output" class="code-mono"></div>
+    <div class="buttons">
+      <button id="clearOutputBtn">出力をクリア</button>
+    </div>
     <div id="errorBox"></div>
     <div id="tokenPanel">
       <h2>トークン一覧</h2>
@@ -2651,6 +2653,17 @@ function renderQrCode(container, text) {
   container.innerHTML = qr.createSvgTag(4, 4);
 }
 
+// GitHub Pagesなどhttp(s)配信ではディレクトリ直下のindex.htmlが自動解決されるため、
+// URLを短くするために末尾のindex.htmlは省く（file://で直接開いた場合は
+// ディレクトリの自動解決がされないため省略しない）。
+function shareBaseUrl() {
+  let pathname = location.pathname;
+  if (location.protocol !== "file:") {
+    pathname = pathname.replace(/index.html$/, "");
+  }
+  return location.origin + pathname;
+}
+
 async function showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl) {
   if (!HAS_COMPRESSION_STREAM) {
     errorBoxEl.textContent = "このブラウザは共有URLの生成に必要なCompressionStream APIに対応していません。";
@@ -2658,7 +2671,7 @@ async function showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl)
     return;
   }
   const hash = await compressToBase64Url(srcEl.value);
-  const url = location.origin + location.pathname + "#" + hash;
+  const url = shareBaseUrl() + "#" + hash;
   history.replaceState(null, "", "#" + hash);
   shareUrlInputEl.value = url;
   sharePanelEl.style.display = "block";
@@ -2752,6 +2765,21 @@ function run() {
   runSeed = (Math.random() * 0xffffffff) >>> 0;
   setRunning(true);
   executeRound();
+}
+
+// 【外部からの入力】の入力待ち中（インラインの<input>が出力欄に挿入されている状態）に
+// 出力をクリアすると、その<input>ごと消えてしまい、Enterを押しても実行が再開されず
+// 「実行」ボタンも無効のまま固まってしまう。それを防ぐため、単に表示を消すだけでなく
+// 実行状態（応答済み入力・シード・実行ボタンの有効/無効）も含めて完全にリセットする。
+function clearOutput() {
+  outputEl.textContent = "";
+  errorBoxEl.style.display = "none";
+  errorBoxEl.textContent = "";
+  answeredInputs = [];
+  inputCallIndex = 0;
+  roundOutput = "";
+  flushedLength = 0;
+  setRunning(false);
 }
 
 function executeRound() {
@@ -2870,10 +2898,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   runBtnEl.addEventListener("click", run);
-  document.getElementById("clearOutputBtn").addEventListener("click", () => {
-    outputEl.textContent = "";
-    errorBoxEl.style.display = "none";
-  });
+  document.getElementById("clearOutputBtn").addEventListener("click", clearOutput);
   document.getElementById("showTokensBtn").addEventListener("click", showTokens);
   document.getElementById("shareBtn").addEventListener("click", () => {
     showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl).catch((e) => {
