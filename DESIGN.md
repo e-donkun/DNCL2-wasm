@@ -120,6 +120,11 @@ IDENT直後に現れた `[` は添字アクセス" という位置による判�
   は2引数で呼んだ場合のみ後方互換的に残した）
 - `べき乗(m,n)` は `**` 演算子に置き換えられたが、関数としても後方互換で残した
 - `二乗`/`奇数`/`二進で表示する` は新仕様に記載がないが後方互換として存続
+- `最大値`/`最小値`: Pythonの`max()`/`min()`に倣い追加。2引数（`最大値(x,y)`）と
+  配列1個（`最大値(配列)`、配列要素の中の最大/最小）の両方の呼び出し方に対応する
+- `切り上げ`/`切り捨て`/`四捨五入`: Pythonの`math.ceil()`/`math.floor()`/四捨五入に
+  倣い追加。`切り捨て`は0方向ではなく負の無限大方向への切り捨てで、0方向切り捨ての
+  `整数()`とは挙動が異なる
 
 ### 後方互換のために残した旧仕様機能
 
@@ -151,9 +156,14 @@ DNCL原文に定義のない挙動はPython3の対応する関数・演算子の
 
 ## インタラクティブな【外部からの入力】（Pythonの`input()`風UX）
 
+`【 】`自体がPythonの`input()`にあたり、`【 】`内に書かれた文字列
+（例: `【外部からの入力】`の「外部からの入力」）は`input(prompt)`のプロンプト引数と
+同様にホスト側へ渡される（`assembly/host.ts`の`hostInput(prompt: string): string`）。
+
 `dist/index.html`のコンソールは、WASMのrunProgram()が完全に同期実行であるにも
-かかわらず、Pythonの`input()`のように出力欄にその場でプロンプト（入力欄）を出して
-入力を受け付ける。仕組みは「リプレイ方式」:
+かかわらず、Pythonの`input()`のように、まずプロンプト文字列を出力欄に表示してから
+その場に入力欄と`[↵]`ボタンを出して入力を受け付ける（Enterキーでも`[↵]`ボタンの
+クリックでも確定できる）。仕組みは「リプレイ方式」:
 
 ```
 run()を押す:
@@ -171,8 +181,9 @@ executeRound():
     needInput = true              // hostInput()がanswered分を使い切って例外を投げた
   flushNewOutput()                 // roundOutputの「前回まで表示済みの続き」だけをDOMに追記
   もし needInput なら:
-    showInlinePrompt()             // 出力欄末尾にinline <input> を表示してfocus
-    // Enter押下時: 入力値をanswerとしてechoし、answeredInputsに追加してexecuteRound()を再実行
+    showInlinePrompt(promptText)   // プロンプト文字列を表示してからinline <input>と[↵]ボタンを表示してfocus
+    // Enterキー押下 または [↵]ボタンクリック時: 入力値をanswerとしてechoし、
+    // answeredInputsに追加してexecuteRound()を再実行
   それ以外なら:
     完了（Run有効化）
 ```
@@ -605,11 +616,9 @@ function fail(msg: string, line: i32): void {
 @external("env", "hostPrint")
 declare function hostPrint(s: string): void;
 
-@external("env", "hostHasInput")
-declare function hostHasInput(): bool;
-
+// promptはPythonのinput(prompt)と同様、入力欄の前に表示する文言
 @external("env", "hostInput")
-declare function hostInput(): string;
+declare function hostInput(prompt: string): string;
 
 // export (JS側から呼ぶ)
 export function runProgram(src: string): void { ... }

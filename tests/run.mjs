@@ -14,6 +14,7 @@ const wasmBuffer = readFileSync(wasmPath);
 async function runDncl(src, inputs) {
   let output = "";
   let error = null;
+  const prompts = [];
   const queue = (inputs || []).slice();
   let ex;
   const { exports } = await instantiate(wasmBuffer, {
@@ -21,7 +22,8 @@ async function runDncl(src, inputs) {
       hostPrint(ptr) {
         output += ex.__getString(ptr);
       },
-      hostInput() {
+      hostInput(promptPtr) {
+        prompts.push(ex.__getString(promptPtr));
         const v = queue.length > 0 ? queue.shift() : "";
         return ex.__newString(v);
       },
@@ -32,7 +34,7 @@ async function runDncl(src, inputs) {
   });
   ex = exports;
   ex.runProgram(ex.__newString(src));
-  return { output, error };
+  return { output, error, prompts };
 }
 
 const tests = [];
@@ -310,12 +312,49 @@ test(
   { expectError: true }
 );
 
+test(
+  "20a: 最大値/最小値（引数2つ）",
+  `
+表示する(最大値(1, 5), 最小値(1, 5))
+表示する(最大値(2, 2))
+`,
+  "51\n2\n"
+);
+
+test(
+  "20b: 最大値/最小値（配列1つ）",
+  `
+Data = [3, 7, 2, 9, 4]
+表示する(最大値(Data), 最小値(Data))
+`,
+  "92\n"
+);
+
+test(
+  "21: 切り上げ/切り捨て/四捨五入",
+  `
+表示する(切り上げ(3.1), 切り捨て(3.9), 四捨五入(3.5))
+表示する(切り上げ(-3.1), 切り捨て(-3.1), 四捨五入(-3.5))
+`,
+  "434\n-3-4-4\n"
+);
+
+test(
+  "22: 【外部からの入力】のプロンプトがホストに渡される",
+  `
+namae =【外部からの入力】
+表示する(namae)
+`,
+  "太郎\n",
+  { inputs: ["太郎"], expectPrompts: ["外部からの入力"] }
+);
+
 async function main() {
   let pass = 0;
   let fail = 0;
   for (const t of tests) {
     try {
-      const { output, error } = await runDncl(t.src, t.opts.inputs);
+      const { output, error, prompts } = await runDncl(t.src, t.opts.inputs);
       if (t.opts.expectError) {
         if (error) {
           console.log(`PASS ${t.name}`);
@@ -328,6 +367,13 @@ async function main() {
       }
       if (error) {
         console.log(`FAIL ${t.name}: 実行時エラー: ${error}`);
+        fail++;
+        continue;
+      }
+      if (t.opts.expectPrompts && JSON.stringify(prompts) !== JSON.stringify(t.opts.expectPrompts)) {
+        console.log(`FAIL ${t.name}`);
+        console.log(`  期待プロンプト: ${JSON.stringify(t.opts.expectPrompts)}`);
+        console.log(`  実際プロンプト: ${JSON.stringify(prompts)}`);
         fail++;
         continue;
       }

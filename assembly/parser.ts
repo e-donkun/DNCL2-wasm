@@ -216,9 +216,10 @@ export class Parser {
     }
     if (this.isType(TT.LINPUT)) {
       this.advance();
-      if (this.isType(TT.WORD)) this.advance(); // "外部からの入力"
+      let prompt = "";
+      if (this.isType(TT.WORD)) prompt = this.advance().text; // 例:「外部からの入力」
       this.expectType(TT.RINPUT, "】");
-      return mkInput(line);
+      return mkInput(prompt, line);
     }
     if (this.isWord("真")) {
       this.advance();

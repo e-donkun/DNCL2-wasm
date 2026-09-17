@@ -479,7 +479,7 @@ export class Interpreter {
   // 実行全体をやり直す「リプレイ方式」で対話的な入力を実現している
   // （dist/index.html・DESIGN.md参照）。
   evalInput(n: Node): Value {
-    const s = hostInput();
+    const s = hostInput(n.str);
     if (s.length > 0) {
       const f = parseFloat(s);
       if (!isNaN(f)) return numVal(f);
@@ -641,6 +641,58 @@ export class Interpreter {
       }
       fail("引数が不正です: 乱数", line);
       return nilVal();
+    }
+    // Pythonのmax()/min()に倣い、最大値/最小値は複数引数(最大値(1,5))・
+    // 配列一つ(最大値(Data))のどちらの呼び方にも対応する
+    if (name == "最大値" || name == "最小値") {
+      const isMax = name == "最大値";
+      let values: Value[];
+      if (args.length == 1 && args[0].kind == VK.ARR && args[0].arr != null) {
+        values = args[0].arr!;
+      } else {
+        values = args;
+      }
+      if (values.length < 1) {
+        fail("引数が不正です: " + name, line);
+        return nilVal();
+      }
+      if (values[0].kind != VK.NUM) {
+        fail("引数が不正です: " + name, line);
+        return nilVal();
+      }
+      let best = values[0].num;
+      for (let i = 1; i < values.length; i++) {
+        if (values[i].kind != VK.NUM) {
+          fail("引数が不正です: " + name, line);
+          return nilVal();
+        }
+        if (isMax ? values[i].num > best : values[i].num < best) best = values[i].num;
+      }
+      return numVal(best);
+    }
+    // 切り上げ/切り捨て/四捨五入。切り捨ては0方向ではなく負の無限大方向への
+    // 切り捨て（Pythonのmath.floor()相当）とする点が整数()と異なる
+    if (name == "切り上げ") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 切り上げ", line);
+        return nilVal();
+      }
+      return numVal(Math.ceil(args[0].num));
+    }
+    if (name == "切り捨て") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 切り捨て", line);
+        return nilVal();
+      }
+      return numVal(Math.floor(args[0].num));
+    }
+    if (name == "四捨五入") {
+      if (args.length < 1 || args[0].kind != VK.NUM) {
+        fail("引数が不正です: 四捨五入", line);
+        return nilVal();
+      }
+      const v = args[0].num;
+      return numVal(v >= 0 ? Math.floor(v + 0.5) : Math.ceil(v - 0.5));
     }
     // 以下は旧仕様の組み込み関数。新仕様には記載がないが、後方互換のため残す
     if (name == "二乗") {
