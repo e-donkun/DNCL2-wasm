@@ -10,6 +10,7 @@ const outDir = path.join(rootDir, "dist");
 const outPath = path.join(outDir, "index.html");
 
 const wasmBase64 = readFileSync(wasmPath).toString("base64");
+const qrcodeLibJs = readFileSync(path.join(rootDir, "vendor", "qrcode-generator.js"), "utf-8");
 
 const SAMPLE_PROGRAM = `# 共通テスト用プログラム表記（2022年11月改訂・新仕様）の例
 # 配列から最大値を探す
@@ -217,6 +218,32 @@ const html = `<!DOCTYPE html>
     font-size: 0.85rem;
     white-space: pre-wrap;
   }
+  #sharePanel { display: none; margin-top: 10px; }
+  .share-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  #shareUrlInput {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--text);
+  }
+  .qr-wrap {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 8px;
+    background: #ffffff;
+    border-radius: 8px;
+    line-height: 0;
+  }
+  .qr-wrap svg { display: block; width: 128px; height: 128px; }
   #tokenPanel { display: none; margin-top: 12px; }
   table.tokens {
     width: 100%;
@@ -248,10 +275,20 @@ const html = `<!DOCTYPE html>
       <button class="primary" id="runBtn">実行</button>
       <button id="clearOutputBtn">出力をクリア</button>
       <button id="showTokensBtn">トークン一覧を表示</button>
+      <button id="shareBtn">共有URL/QRコードを作成</button>
+    </div>
+    <div id="sharePanel">
+      <div class="share-row">
+        <input type="text" id="shareUrlInput" readonly>
+        <button id="copyShareUrlBtn">コピー</button>
+      </div>
+      <div class="qr-wrap"><div id="qrContainer"></div></div>
     </div>
     <p class="hint">
       # から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。
       【外部からの入力】に到達すると、右側の出力欄にその場で入力欄が表示されます（Pythonのinput()と同様）。
+      「共有URL/QRコードを作成」で、今のソースコードをURLの#以降に埋め込んだリンクとQRコードを作成できます。
+      そのURLを開くとソースコードが復元された状態で開きます。
     </p>
   </div>
   <div class="panel">
@@ -270,6 +307,10 @@ const html = `<!DOCTYPE html>
   </div>
 </div>
 <footer>DNCL → WebAssembly コンソール（AssemblyScriptでビルド、単一HTMLファイル・外部fetchなし）</footer>
+<script>
+// ==== QRコード生成ライブラリ（vendor/qrcode-generator.js。MIT, Copyright (c) 2009 Kazuhiko Arase） ====
+${qrcodeLibJs}
+</script>
 <script>
 "use strict";
 
@@ -311,6 +352,72 @@ function getString(ptr) {
     s += String.fromCharCode.apply(null, arr.subarray(i, Math.min(i + CHUNK, len)));
   }
   return s;
+}
+
+// ==== 共有URL（ソースコードをURLの#以降に埋め込む） ====
+//
+// ソースコードをUTF-8バイト列にしてから生Deflate（zlib/gzipヘッダなしのDEFLATE、
+// ブラウザ標準のCompressionStream/DecompressionStreamの"deflate-raw"）で圧縮し、
+// base64url（+/ の代わりに -_ を使い、パディング=を省略したもの）にエンコードして
+// URLフラグメント（#以降）に格納する。フラグメントは外部サーバーに送信されないため、
+// 「外部URLへは一切アクセスしない」という方針とも矛盾しない。
+const HAS_COMPRESSION_STREAM = typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";
+
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(str) {
+  let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function compressToBase64Url(text) {
+  const data = new TextEncoder().encode(text);
+  const cs = new CompressionStream("deflate-raw");
+  const writer = cs.writable.getWriter();
+  writer.write(data);
+  writer.close();
+  const compressed = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  return bytesToBase64Url(compressed);
+}
+
+async function decompressFromBase64Url(hash) {
+  const bytes = base64UrlToBytes(hash);
+  const ds = new DecompressionStream("deflate-raw");
+  const writer = ds.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const decompressed = await new Response(ds.readable).arrayBuffer();
+  return new TextDecoder().decode(decompressed);
+}
+
+function renderQrCode(container, text) {
+  container.innerHTML = "";
+  const qr = qrcode(0, "M");
+  qr.addData(text);
+  qr.make();
+  container.innerHTML = qr.createSvgTag(4, 4);
+}
+
+async function showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl) {
+  if (!HAS_COMPRESSION_STREAM) {
+    errorBoxEl.textContent = "このブラウザは共有URLの生成に必要なCompressionStream APIに対応していません。";
+    errorBoxEl.style.display = "block";
+    return;
+  }
+  const hash = await compressToBase64Url(srcEl.value);
+  const url = location.origin + location.pathname + "#" + hash;
+  history.replaceState(null, "", "#" + hash);
+  shareUrlInputEl.value = url;
+  sharePanelEl.style.display = "block";
+  renderQrCode(qrContainerEl, url);
 }
 
 // ==== インタラクティブな【外部からの入力】（Pythonのinput()風のUX） ====
@@ -481,14 +588,27 @@ function updateLineNumbers() {
   lineNumbersEl.textContent = lines.join("\\n");
 }
 
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   outputEl = document.getElementById("output");
   errorBoxEl = document.getElementById("errorBox");
   runBtnEl = document.getElementById("runBtn");
   const srcEl = document.getElementById("src");
   const lineNumbersEl = document.getElementById("lineNumbers");
+  const sharePanelEl = document.getElementById("sharePanel");
+  const shareUrlInputEl = document.getElementById("shareUrlInput");
+  const qrContainerEl = document.getElementById("qrContainer");
 
-  srcEl.value = ${JSON.stringify(SAMPLE_PROGRAM)};
+  // URLの#以降に共有用のソースコードが埋め込まれていれば、それを初期値にする
+  let initialSource = null;
+  const hash = location.hash.replace(/^#/, "");
+  if (hash && HAS_COMPRESSION_STREAM) {
+    try {
+      initialSource = await decompressFromBase64Url(hash);
+    } catch (e) {
+      console.error("Failed to restore source code from URL", e);
+    }
+  }
+  srcEl.value = initialSource !== null ? initialSource : ${JSON.stringify(SAMPLE_PROGRAM)};
   updateLineNumbers();
   srcEl.addEventListener("input", updateLineNumbers);
   srcEl.addEventListener("scroll", () => {
@@ -510,6 +630,25 @@ window.addEventListener("DOMContentLoaded", () => {
     errorBoxEl.style.display = "none";
   });
   document.getElementById("showTokensBtn").addEventListener("click", showTokens);
+  document.getElementById("shareBtn").addEventListener("click", () => {
+    showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl).catch((e) => {
+      errorBoxEl.textContent = "共有URLの生成に失敗しました: " + (e && e.message ? e.message : String(e));
+      errorBoxEl.style.display = "block";
+    });
+  });
+  document.getElementById("copyShareUrlBtn").addEventListener("click", async () => {
+    shareUrlInputEl.select();
+    try {
+      await navigator.clipboard.writeText(shareUrlInputEl.value);
+    } catch (e) {
+      // クリップボードAPIが使えない環境では、選択状態にするだけでも
+      // 手動コピー（Ctrl+C / Cmd+C）できるようにしておく
+    }
+  });
+  if (!HAS_COMPRESSION_STREAM) {
+    document.getElementById("shareBtn").disabled = true;
+    document.getElementById("shareBtn").title = "このブラウザは共有URLの生成に対応していません";
+  }
   initWasm().catch((e) => {
     errorBoxEl.textContent = "WASM初期化エラー: " + (e && e.message ? e.message : String(e));
     errorBoxEl.style.display = "block";

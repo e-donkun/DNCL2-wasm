@@ -203,6 +203,26 @@ executeRound():
   厳密に反映するものではなく、等幅フォント上で目安として機能する簡易的な実装である。
 - Tabキー押下でスペース4つを挿入するショートカットも追加。
 
+## 共有URL・QRコード生成
+
+ソースコードをURLに埋め込んで共有できる機能を`dist/index.html`に実装した。
+
+- **エンコード**: ソースコードをUTF-8バイト列にし、ブラウザ標準の
+  `CompressionStream('deflate-raw')`（zlib/gzipヘッダなしの生DEFLATE）で圧縮、
+  その結果を`+/`の代わりに`-_`を使いパディング`=`を省いたbase64url形式に変換して
+  URLのフラグメント（`#`以降）に格納する（`compressToBase64Url()`）。
+  フラグメントはサーバーに送信されない部分なので「外部URLへは一切アクセスしない」
+  という方針とも矛盾しない。
+- **デコード**: ページ読み込み時（`DOMContentLoaded`）に`location.hash`を確認し、
+  値があれば`DecompressionStream('deflate-raw')`で復元してソースコードの初期値とする
+  （`decompressFromBase64Url()`）。値がない場合は従来どおり組み込みのサンプルを表示する。
+- **QRコード**: 生成したURLを`vendor/qrcode-generator.js`（npm `qrcode-generator`
+  パッケージ、MIT、Kazuhiko Arase作。ビルド時に単一HTMLへインライン埋め込み）で
+  SVGとして描画する。URLはASCII文字のみのため、UTF-8対応版のqrcode_UTF8.jsは
+  不要（標準のByteモードで足りる）。
+- `CompressionStream`/`DecompressionStream`非対応ブラウザでは、共有ボタンを
+  無効化してフォールバックする（機能検出は`HAS_COMPRESSION_STREAM`）。
+
 ## 0. 全体アーキテクチャ
 
 ```
