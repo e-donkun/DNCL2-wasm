@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNCL2実行環境について</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --border: #d2d2d7;
+    --accent: #0071e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --panel-bg: #2c2c2e;
+      --text: #f5f5f7;
+      --muted: #a1a1a6;
+      --border: #48484a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    padding: 16px;
+  }
+  .panel {
+    max-width: 700px;
+    margin: 0 auto;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+  }
+  h1 { font-size: 1.2rem; margin-top: 0; }
+  h2 { font-size: 1rem; margin-top: 1.5em; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-top: 1.5em; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <h1>DNCL2実行環境について</h1>
+  <p>大学入学共通テスト用プログラム表記(DNCL2)を、ブラウザ上のWebAssemblyで実行するツールです。</p>
+
+  <h2>コメント・ブロック構文</h2>
+  <p><code>#</code> から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。</p>
+
+  <h2>外部からの入力</h2>
+  <p><code>【外部からの入力】</code>に到達すると、出力欄にその場で入力欄が表示されます（Pythonの<code>input()</code>と同様です）。</p>
+
+  <h2>共有URL・QRコード</h2>
+  <p>「共有URL/QRコードを作成」で、今のソースコードをURLの<code>#</code>以降に埋め込んだリンクとQRコードを作成できます。そのURLを開くとソースコードが復元された状態で開きます。</p>
+
+  <a class="back" href="index.html">← DNCL2実行環境に戻る</a>
+</div>
+</body>
+</html>

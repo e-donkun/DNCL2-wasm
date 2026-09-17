@@ -40,7 +40,7 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DNCL → WebAssembly コンソール</title>
+<title>DNCL2実行環境</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -55,7 +55,6 @@ const html = `<!DOCTYPE html>
     --console-text: #d4d4d4;
     --error-bg: #fdecea;
     --error-text: #b3261e;
-    --indent-guide: rgba(0, 0, 0, 0.08);
     --gutter-bg: #f0f0f2;
   }
   @media (prefers-color-scheme: dark) {
@@ -69,7 +68,6 @@ const html = `<!DOCTYPE html>
       --console-text: #d4d4d4;
       --error-bg: #3a1f1d;
       --error-text: #ff6b60;
-      --indent-guide: rgba(255, 255, 255, 0.09);
       --gutter-bg: #232325;
     }
   }
@@ -149,15 +147,6 @@ const html = `<!DOCTYPE html>
     resize: none;
     white-space: pre;
     overflow: auto;
-    background-image: repeating-linear-gradient(
-      to right,
-      var(--indent-guide) 0,
-      var(--indent-guide) 1px,
-      transparent 1px,
-      transparent 4ch
-    );
-    background-origin: content-box;
-    background-attachment: local;
   }
   #src:focus { outline: none; }
   .buttons {
@@ -262,8 +251,8 @@ const html = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>DNCL → WebAssembly コンソール</h1>
-<p class="subtitle">共通テスト手順記述標準言語（DNCL）をブラウザ上のWebAssemblyで実行します。外部ネットワークへは一切アクセスしません。</p>
+<h1>DNCL2実行環境</h1>
+<p class="subtitle">大学入学共通テスト用プログラム表記(DNCL2)をブラウザ上で実行します。外部ネットワークへは一切アクセスしません。</p>
 <div class="layout">
   <div class="panel">
     <h2>ソースコード</h2>
@@ -274,7 +263,7 @@ const html = `<!DOCTYPE html>
     <div class="buttons">
       <button class="primary" id="runBtn">実行</button>
       <button id="clearOutputBtn">出力をクリア</button>
-      <button id="showTokensBtn">トークン一覧を表示</button>
+      <button id="showTokensBtn" hidden>トークン一覧を表示</button>
       <button id="shareBtn">共有URL/QRコードを作成</button>
     </div>
     <div id="sharePanel">
@@ -284,12 +273,7 @@ const html = `<!DOCTYPE html>
       </div>
       <div class="qr-wrap"><div id="qrContainer"></div></div>
     </div>
-    <p class="hint">
-      # から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。
-      【外部からの入力】に到達すると、右側の出力欄にその場で入力欄が表示されます（Pythonのinput()と同様）。
-      「共有URL/QRコードを作成」で、今のソースコードをURLの#以降に埋め込んだリンクとQRコードを作成できます。
-      そのURLを開くとソースコードが復元された状態で開きます。
-    </p>
+    <p class="hint"><a href="about.html">使い方・このツールについて</a></p>
   </div>
   <div class="panel">
     <h2>出力</h2>
@@ -306,7 +290,7 @@ const html = `<!DOCTYPE html>
     </div>
   </div>
 </div>
-<footer>DNCL → WebAssembly コンソール（AssemblyScriptでビルド、単一HTMLファイル・外部fetchなし）</footer>
+<footer>DNCL2実行環境（AssemblyScriptでビルド、単一HTMLファイル・外部fetchなし）</footer>
 <script>
 // ==== QRコード生成ライブラリ（vendor/qrcode-generator.js。MIT, Copyright (c) 2009 Kazuhiko Arase） ====
 ${qrcodeLibJs}
@@ -659,6 +643,84 @@ window.addEventListener("DOMContentLoaded", async () => {
 </html>
 `;
 
+const aboutHtml = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNCL2実行環境について</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --border: #d2d2d7;
+    --accent: #0071e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --panel-bg: #2c2c2e;
+      --text: #f5f5f7;
+      --muted: #a1a1a6;
+      --border: #48484a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    padding: 16px;
+  }
+  .panel {
+    max-width: 700px;
+    margin: 0 auto;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+  }
+  h1 { font-size: 1.2rem; margin-top: 0; }
+  h2 { font-size: 1rem; margin-top: 1.5em; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-top: 1.5em; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <h1>DNCL2実行環境について</h1>
+  <p>大学入学共通テスト用プログラム表記(DNCL2)を、ブラウザ上のWebAssemblyで実行するツールです。</p>
+
+  <h2>コメント・ブロック構文</h2>
+  <p><code>#</code> から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。</p>
+
+  <h2>外部からの入力</h2>
+  <p><code>【外部からの入力】</code>に到達すると、出力欄にその場で入力欄が表示されます（Pythonの<code>input()</code>と同様です）。</p>
+
+  <h2>共有URL・QRコード</h2>
+  <p>「共有URL/QRコードを作成」で、今のソースコードをURLの<code>#</code>以降に埋め込んだリンクとQRコードを作成できます。そのURLを開くとソースコードが復元された状態で開きます。</p>
+
+  <a class="back" href="index.html">← DNCL2実行環境に戻る</a>
+</div>
+</body>
+</html>
+`;
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(outPath, html, "utf-8");
 console.log("wrote " + outPath + " (" + (html.length / 1024).toFixed(1) + " KB)");
+
+const aboutOutPath = path.join(outDir, "about.html");
+writeFileSync(aboutOutPath, aboutHtml, "utf-8");
+console.log("wrote " + aboutOutPath + " (" + (aboutHtml.length / 1024).toFixed(1) + " KB)");

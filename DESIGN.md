@@ -191,17 +191,15 @@ executeRound():
 `assembly/index.ts`が`seedRandom(seed: u32)`をエクスポートし、HTML側が
 各ラウンドの開始時に同じシードで呼び直す。
 
-## エディタUI（行番号・インデントガイド）
+## エディタUI（行番号ガター）
 
 `dist/index.html`の`#src`テキストエリアには以下を追加した:
 
 - **行番号ガター**: `#lineNumbers`という別divを`#src`の左に並べ、`input`イベントで
   行数を再計算し、`scroll`イベントで`scrollTop`を同期する素朴な実装。
-- **インデントガイド**: `#src`の`background-image`に`repeating-linear-gradient`で
-  4文字ごとに縦線を敷き、`background-origin: content-box; background-attachment: local;`
-  でテキストのスクロールに追従させる。実際のインデント構造（INDENT/DEDENTの深さ）を
-  厳密に反映するものではなく、等幅フォント上で目安として機能する簡易的な実装である。
 - Tabキー押下でスペース4つを挿入するショートカットも追加。
+- インデントガイド（背景の縦線）は当初`repeating-linear-gradient`で実装したが、
+  見た目の要望により削除した。
 
 ## 共有URL・QRコード生成
 
