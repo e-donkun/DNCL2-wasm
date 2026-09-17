@@ -22,7 +22,8 @@ Python類似の記法になった。参考PDF上では各行の先頭に `｜`�
 `⎿`（U+23BF、ブロック末尾）というガイド記号が付与されているが、これは目視用の
 ブロックガイド線であり、実際の入力はスペースによるインデントで行うのが実用的と判断した
 （Pythonのコードを書ける人がそのまま書ける形にするため）。ただし、PDFからそのまま
-コピー＆ペーストしても動くよう、`｜`・`⎿` もインデント文字として受理する。
+コピー＆ペーストしても動くよう、`｜`・`⎿` に加えて `|`・`│`・`┃`・`└`・`┗`
+（半角パイプ・罫線素片）もインデント文字として受理する。
 
 lexer.ts はPythonのトークナイザと同様の方式で、各論理行の先頭で字下げ幅を測定し
 `TT.INDENT`/`TT.DEDENT` トークンを発行する（インデントスタック方式）:
@@ -31,13 +32,25 @@ lexer.ts はPythonのトークナイザと同様の方式で、各論理行の�
 function tokenize(src: string): Token[] {
   const indentStack: i32[] = [0];
   // 論理行の先頭ごとに:
-  //   1. 空白・タブ・全角スペース・｜・⎿ の連続を「字下げ幅」として数える
+  //   1. 空白・タブ・全角スペース・｜・⎿・|・│・┃・└・┗ の連続を
+  //      「字下げ幅」として数える
   //   2. 空行・コメントのみの行はインデント判定をスキップする（Python同様）
   //   3. 幅 > スタック上端 なら INDENT を発行してpush
   //      幅 < スタック上端 なら 一致するまで pop してDEDENTを都度発行
   // ファイル末尾では残りのインデントレベルをすべてDEDENTで閉じる
 }
 ```
+
+### 括弧の中の改行（式の途中での折り返し）
+
+問題文の作例では、`表示する(...)`のような呼び出しの引数リストが長い場合に
+式の途中で改行して書かれることがある（次の行の先頭は `⎿` などのガイド記号の
+ことが多い）。Pythonが `()`/`[]`/`{}` の中の改行を暗黙の行継続として扱うのに
+倣い、lexer.tsでも`(`/`[`/`{`を読むたびに`parenDepth`をインクリメント、
+`)`/`]`/`}`でデクリメントするカウンタを持たせ、`parenDepth > 0`の間に現れた
+改行はNEWLINEトークンを発行せず、INDENT/DEDENT判定（字下げ幅の測定）も行わない
+ようにした。継続行の先頭にある`⎿`やスペースは、通常の空白として読み飛ばされる
+（`isSpaceLike`の判定に含まれるため）。
 
 ### 文の判別（parseStatement）の新旧分岐
 
@@ -216,21 +229,52 @@ executeRound():
 
 ソースコードをURLに埋め込んで共有できる機能を`dist/index.html`に実装した。
 
-- **エンコード**: ソースコードをUTF-8バイト列にし、ブラウザ標準の
-  `CompressionStream('deflate-raw')`（zlib/gzipヘッダなしの生DEFLATE）で圧縮、
-  その結果を`+/`の代わりに`-_`を使いパディング`=`を省いたbase64url形式に変換して
-  URLのフラグメント（`#`以降）に格納する（`compressToBase64Url()`）。
-  フラグメントはサーバーに送信されない部分なので「外部URLへは一切アクセスしない」
-  という方針とも矛盾しない。
+- **エンコード**: 添字開始番号("0"または"1"の1文字)をソースコードの前に連結してから
+  UTF-8バイト列にし、ブラウザ標準の`CompressionStream('deflate-raw')`
+  （zlib/gzipヘッダなしの生DEFLATE）で圧縮、その結果を`+/`の代わりに`-_`を使い
+  パディング`=`を省いたbase64url形式に変換してURLのフラグメント（`#`以降）に
+  格納する（`compressToBase64Url()`）。フラグメントはサーバーに送信されない部分
+  なので「外部URLへは一切アクセスしない」という方針とも矛盾しない。
 - **デコード**: ページ読み込み時（`DOMContentLoaded`）に`location.hash`を確認し、
-  値があれば`DecompressionStream('deflate-raw')`で復元してソースコードの初期値とする
-  （`decompressFromBase64Url()`）。値がない場合は従来どおり組み込みのサンプルを表示する。
+  値があれば`DecompressionStream('deflate-raw')`で復元する（`decompressFromBase64Url()`）。
+  復元した文字列の先頭1文字を添字開始番号としてプルダウン(`#indexBaseSelect`)に
+  反映し、残りをソースコードの初期値とする。値がない場合は従来どおり組み込みの
+  サンプルを表示する（添字開始番号はプルダウンの初期値である"0"のまま）。
 - **QRコード**: 生成したURLを`vendor/qrcode-generator.js`（npm `qrcode-generator`
   パッケージ、MIT、Kazuhiko Arase作。ビルド時に単一HTMLへインライン埋め込み）で
   SVGとして描画する。URLはASCII文字のみのため、UTF-8対応版のqrcode_UTF8.jsは
   不要（標準のByteモードで足りる）。
 - `CompressionStream`/`DecompressionStream`非対応ブラウザでは、共有ボタンを
   無効化してフォールバックする（機能検出は`HAS_COMPRESSION_STREAM`）。
+
+## 配列添字の開始番号（0始まり/1始まり）の切替
+
+新仕様の配列添字は0始まりが基本だが、1始まりを前提とした作例も見られるため、
+実行時に切り替えられるようにした。
+
+- **WASM側**: `assembly/interpreter.ts`の`Interpreter`クラスに`indexBase: i32`
+  フィールドを持たせ、`evalIndex()`/`assignIndex()`で添字を使う直前に
+  `<i32>Math.round(idxVal.num) - this.indexBase`として内部の0始まり配列への
+  添字に変換してからアクセスする。影響するのは添字アクセスのみで、
+  `要素数()`の戻り値や`for`文の範囲（ユーザーが書いた数値そのもの）には
+  影響しない。
+- **エクスポート**: `assembly/index.ts`の`runProgram(src: string, indexBase: i32)`
+  の第2引数として渡す。
+  **注意**: 当初`indexBase: i32 = 0`のようにデフォルト引数にしたところ、
+  AssemblyScriptが生成するエクスポート関数が`__setArgumentsLength()`の
+  事前呼び出しを前提とするトランポリン形式になり、それを呼ばずに
+  手書きグルーコード（`@assemblyscript/loader`を使わない`dist/index.html`）
+  から直接2引数で呼ぶとWASMの引数解釈がずれて`unreachable`トラップになる
+  不具合が起きた。`@assemblyscript/loader`（`tests/run.mjs`が使用）は
+  この呼び出し規約を自動的に処理するため問題が表面化せず、発見が遅れた。
+  デフォルト値を外し、呼び出し側（`tests/run.mjs`・`scripts/build-html.mjs`）
+  で常に明示的に第2引数を渡す形にして解決した。
+- **UI**: `dist/index.html`の「ソースコード」見出し横に`<select id="indexBaseSelect">`
+  を設置し、「実行」ボタン押下時（`run()`）に選択値を読み取ってグローバル変数
+  `indexBase`に保持、`executeRound()`内の`runProgram`呼び出しに渡す
+  （【外部からの入力】のリプレイ実行でも同じ値を使い回す）。
+- **共有URL**: 上記「共有URL・QRコード生成」の通り、URLハッシュの先頭1文字に
+  添字開始番号を埋め込み、復元時にプルダウンへ反映する。
 
 ## 0. 全体アーキテクチャ
 

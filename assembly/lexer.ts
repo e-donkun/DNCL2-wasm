@@ -11,9 +11,21 @@
 import { Token, TT } from "./token";
 import { fail } from "./errors";
 
-// 半角/タブ/全角スペース、および｜・⎿（ブロックガイド記号）はすべて「空白」として扱う
+// 半角/タブ/全角スペース、および｜・⎿・|・│・┃・└・┗（ブロックガイド記号）は
+// すべて「空白」として扱う
 function isSpaceLike(c: i32): bool {
-  return c == 32 || c == 9 || c == 0x3000 || c == 0xff5c || c == 0x23bf;
+  return (
+    c == 32 ||
+    c == 9 ||
+    c == 0x3000 ||
+    c == 0xff5c || // ｜
+    c == 0x23bf || // ⎿
+    c == 0x7c || // |
+    c == 0x2502 || // │
+    c == 0x2503 || // ┃
+    c == 0x2514 || // └
+    c == 0x2517 // ┗
+  );
 }
 
 function isDigit(c: i32): bool {
@@ -88,6 +100,11 @@ export function tokenize(src: string): Token[] {
   let line = 1;
   const indentStack: i32[] = [0];
   let atLineStart = true;
+  // ()/[]/{}の対応が閉じていない間の改行は、Pythonの暗黙の行継続と同様に
+  // NEWLINE/INDENT/DEDENT判定を行わず単なる空白として読み飛ばす。これにより、
+  // 式の途中で折り返した行（先頭が｜・⎿などのガイド記号でも可）を1つの論理行
+  // として扱える。
+  let parenDepth = 0;
 
   while (i < n) {
     if (atLineStart) {
@@ -122,6 +139,12 @@ export function tokenize(src: string): Token[] {
 
     if (c == 10) {
       // \n
+      if (parenDepth > 0) {
+        // 括弧の中の改行は行継続とみなす（Python同様）
+        line++;
+        i++;
+        continue;
+      }
       pushNewline(tokens, line);
       line++;
       i++;
@@ -255,6 +278,10 @@ export function tokenize(src: string): Token[] {
     }
     const single = singleCharTokenType(c);
     if (single >= 0) {
+      if (single == TT.LPAREN || single == TT.LBRACKET || single == TT.LBRACE) parenDepth++;
+      else if (single == TT.RPAREN || single == TT.RBRACKET || single == TT.RBRACE) {
+        if (parenDepth > 0) parenDepth--;
+      }
       tokens.push(new Token(single, String.fromCharCode(c), 0, line));
       i++;
       continue;

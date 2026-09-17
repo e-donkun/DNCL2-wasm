@@ -11,7 +11,7 @@ const wasmPath = path.join(__dirname, "..", "build", "dncl.debug.wasm");
 const wasmBuffer = readFileSync(wasmPath);
 
 // 1回の実行ごとに新しくinstantiateしてテスト間の状態を分離する
-async function runDncl(src, inputs) {
+async function runDncl(src, inputs, indexBase) {
   let output = "";
   let error = null;
   const prompts = [];
@@ -33,7 +33,7 @@ async function runDncl(src, inputs) {
     }
   });
   ex = exports;
-  ex.runProgram(ex.__newString(src));
+  ex.runProgram(ex.__newString(src), indexBase || 0);
   return { output, error, prompts };
 }
 
@@ -349,12 +349,115 @@ namae =【外部からの入力】
   { inputs: ["太郎"], expectPrompts: ["外部からの入力"] }
 );
 
+// ---- 新規: インデント代替記号(|・│・┃・└・┗) ----
+
+test(
+  "23: |・│・┃・└・┗もインデントとして扱われる",
+  `
+x = 5
+もし x < 10 ならば:
+| y = 1
+そうでなければ:
+│ y = 2
+表示する(y)
+もし x < 10 ならば:
+┃ z = 10
+そうでなければ:
+└ z = 20
+表示する(z)
+もし x < 10 ならば:
+┗ w = 100
+そうでなければ:
+  w = 200
+表示する(w)
+`,
+  "1\n10\n100\n"
+);
+
+// ---- 新規: 括弧の対応が閉じるまで改行を行継続として扱う ----
+
+test(
+  "24: 括弧の中の改行は行継続として扱われる",
+  `
+表示する(1,
+         2,
+         3)
+`,
+  "123\n"
+);
+
+test(
+  "25: 配列リテラルの途中の改行も行継続として扱われる",
+  `
+Data = [1,
+        2,
+        3]
+表示する(要素数(Data), Data[0])
+`,
+  "31\n"
+);
+
+// ---- 新規: 配列添字の開始番号(indexBase)切替 ----
+
+test(
+  "26a: indexBase=1で配列の添字が1始まりになる",
+  `
+Data = [10, 20, 30]
+表示する(Data[1], Data[2], Data[3])
+`,
+  "102030\n",
+  { indexBase: 1 }
+);
+
+test(
+  "26b: indexBase=1でも要素数()は配列長のまま",
+  `
+Data = [10, 20, 30]
+表示する(要素数(Data))
+`,
+  "3\n",
+  { indexBase: 1 }
+);
+
+test(
+  "26c: indexBase=1で範囲外(0番目)アクセスはエラーになる",
+  `
+Data = [10, 20, 30]
+表示する(Data[0])
+`,
+  null,
+  { indexBase: 1, expectError: true }
+);
+
+// ---- 座席配分の統合サンプル(新インデント記号+括弧内改行+indexBase=1) ----
+
+const SEAT_ALLOCATION = `
+taiken = 3
+Touchaku = [0, 3, 4, 10, 11, 12]
+kyakusu = 要素数(Touchaku)
+Kaishi = [0, 0, 0, 0, 0, 0]
+Shuryou = [0, 0, 0, 0, 0, 0]
+Shuryou[1] = taiken
+i を 2 から kyakusu まで 1 ずつ増やしながら繰り返す：
+｜ Kaishi[i] = 最大値(Touchaku[i], Shuryou[i-1])
+｜ Shuryou[i] = Kaishi[i] + taiken
+｜ 表示する(i, "人目の待ち時間：",
+⎿          Kaishi[i] - Touchaku[i], "分間")
+`;
+
+test(
+  "27: 公式サンプル風(座席配分)。新記号インデント・括弧内改行・indexBase=1の統合確認",
+  SEAT_ALLOCATION,
+  "2人目の待ち時間：0分間\n3人目の待ち時間：2分間\n4人目の待ち時間：0分間\n5人目の待ち時間：2分間\n6人目の待ち時間：4分間\n",
+  { indexBase: 1 }
+);
+
 async function main() {
   let pass = 0;
   let fail = 0;
   for (const t of tests) {
     try {
-      const { output, error, prompts } = await runDncl(t.src, t.opts.inputs);
+      const { output, error, prompts } = await runDncl(t.src, t.opts.inputs, t.opts.indexBase);
       if (t.opts.expectError) {
         if (error) {
           console.log(`PASS ${t.name}`);

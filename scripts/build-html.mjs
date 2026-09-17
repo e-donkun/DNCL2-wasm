@@ -107,6 +107,22 @@ const html = `<!DOCTYPE html>
     font-size: 0.95rem;
     margin: 0 0 8px;
   }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .panel-header h2 { margin: 0 0 8px; }
+  #indexBaseSelect {
+    font-size: 0.78rem;
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--text);
+  }
   .code-mono {
     font-family: "SF Mono", Menlo, Consolas, monospace;
     font-size: 0.85rem;
@@ -270,7 +286,13 @@ const html = `<!DOCTYPE html>
 <p class="subtitle">大学入学共通テスト用プログラム表記(DNCL2)をブラウザ上で実行します。外部ネットワークへは一切アクセスしません。</p>
 <div class="layout">
   <div class="panel">
-    <h2>ソースコード</h2>
+    <div class="panel-header">
+      <h2>ソースコード</h2>
+      <select id="indexBaseSelect">
+        <option value="1">配列の添字は1から始まる</option>
+        <option value="0" selected>配列の添字は0から始まる</option>
+      </select>
+    </div>
     <div class="editor">
       <div id="lineNumbers" class="line-numbers code-mono">1</div>
       <textarea id="src" class="code-mono" spellcheck="false"></textarea>
@@ -418,13 +440,17 @@ function shareBaseUrl() {
   return location.origin + pathname;
 }
 
+// 共有URLのハッシュ先頭1文字は添字開始番号("0"または"1")。ソースコードの
+// 復元だけでなく、配列添字が0始まり/1始まりのどちらの前提で書かれたコードかも
+// あわせて復元できるようにする（DESIGN.md「配列添字の開始番号」参照）。
 async function showShareUrl(srcEl, sharePanelEl, shareUrlInputEl, qrContainerEl) {
   if (!HAS_COMPRESSION_STREAM) {
     errorBoxEl.textContent = "このブラウザは共有URLの生成に必要なCompressionStream APIに対応していません。";
     errorBoxEl.style.display = "block";
     return;
   }
-  const hash = await compressToBase64Url(srcEl.value);
+  const indexBasePrefix = indexBaseSelectEl.value === "1" ? "1" : "0";
+  const hash = await compressToBase64Url(indexBasePrefix + srcEl.value);
   const url = shareBaseUrl() + "#" + hash;
   history.replaceState(null, "", "#" + hash);
   shareUrlInputEl.value = url;
@@ -449,6 +475,7 @@ class NeedInputSignal {
 }
 
 let sourceCode = "";
+let indexBase = 0;
 let answeredInputs = [];
 let inputCallIndex = 0;
 let runSeed = 0;
@@ -456,7 +483,7 @@ let roundOutput = "";
 let flushedLength = 0;
 
 // ==== ホスト実装（DESIGN.md 5.4節） ====
-let outputEl, errorBoxEl, runBtnEl;
+let outputEl, errorBoxEl, runBtnEl, indexBaseSelectEl;
 
 function hostPrintImpl(ptr) {
   roundOutput += getString(ptr);
@@ -515,6 +542,7 @@ function flushNewOutput() {
 
 function run() {
   sourceCode = document.getElementById("src").value;
+  indexBase = indexBaseSelectEl.value === "1" ? 1 : 0;
   outputEl.textContent = "";
   errorBoxEl.style.display = "none";
   errorBoxEl.textContent = "";
@@ -547,7 +575,7 @@ function executeRound() {
   let needInput = false;
   let promptText = "";
   try {
-    wasmExports.runProgram(newString(sourceCode));
+    wasmExports.runProgram(newString(sourceCode), indexBase);
   } catch (e) {
     if (e instanceof NeedInputSignal) {
       needInput = true;
@@ -642,23 +670,29 @@ window.addEventListener("DOMContentLoaded", async () => {
   outputEl = document.getElementById("output");
   errorBoxEl = document.getElementById("errorBox");
   runBtnEl = document.getElementById("runBtn");
+  indexBaseSelectEl = document.getElementById("indexBaseSelect");
   const srcEl = document.getElementById("src");
   const lineNumbersEl = document.getElementById("lineNumbers");
   const sharePanelEl = document.getElementById("sharePanel");
   const shareUrlInputEl = document.getElementById("shareUrlInput");
   const qrContainerEl = document.getElementById("qrContainer");
 
-  // URLの#以降に共有用のソースコードが埋め込まれていれば、それを初期値にする
+  // URLの#以降に共有用のソースコードが埋め込まれていれば、それを初期値にする。
+  // 先頭1文字は添字開始番号("0"/"1")なので、プルダウンにも反映する。
   let initialSource = null;
+  let initialIndexBase = null;
   const hash = location.hash.replace(/^#/, "");
   if (hash && HAS_COMPRESSION_STREAM) {
     try {
-      initialSource = await decompressFromBase64Url(hash);
+      const decoded = await decompressFromBase64Url(hash);
+      initialIndexBase = decoded.charAt(0) === "1" ? "1" : "0";
+      initialSource = decoded.slice(1);
     } catch (e) {
       console.error("Failed to restore source code from URL", e);
     }
   }
   srcEl.value = initialSource !== null ? initialSource : ${JSON.stringify(SAMPLE_PROGRAM)};
+  if (initialIndexBase !== null) indexBaseSelectEl.value = initialIndexBase;
   updateLineNumbers();
   srcEl.addEventListener("input", updateLineNumbers);
   srcEl.addEventListener("scroll", () => {
@@ -770,7 +804,11 @@ const aboutHtml = `<!DOCTYPE html>
   <p>大学入学共通テスト用プログラム表記(DNCL2)を、ブラウザ上のWebAssemblyで実行するツールです。</p>
 
   <h2>コメント・ブロック構文</h2>
-  <p><code>#</code> から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。</p>
+  <p><code>#</code> から行末まではコメントとして無視されます。ブロックはインデント（半角スペース）で表します。<code>｜</code>・<code>⎿</code>・<code>|</code>・<code>│</code>・<code>┃</code>・<code>└</code>・<code>┗</code>もインデントの代わりとして使えます（問題文のブロックガイド記号をそのまま貼り付けても動作します）。</p>
+  <p>また、<code>()</code>・<code>[]</code>・<code>{}</code>が閉じていない間の改行は行の継続として扱われ、式の途中で折り返して書いても1行として実行されます。</p>
+
+  <h2>配列の添字</h2>
+  <p>「ソースコード」の見出し横のプルダウンで、配列（および文字列）の添字が0から始まるか1から始まるかを切り替えられます。「配列の添字は1から始まる」を選ぶと、<code>Data[1]</code>が配列の先頭要素を指すようになります。<code>要素数()</code>が返す値（配列の長さ）はどちらを選んでも変わりません。</p>
 
   <h2>利用できる関数</h2>
   <table class="fn-table">
@@ -800,7 +838,7 @@ const aboutHtml = `<!DOCTYPE html>
   <p><code>【 】</code>がPythonの<code>input()</code>にあたり、<code>【 】</code>内に書いた文字列はプロンプトとして扱われます。<code>【外部からの入力】</code>に到達すると、まずそのプロンプト文字列が出力欄に表示され、続けてその場に入力欄と<code>[↵]</code>ボタンが表示されます。値を入力してEnterキーを押すか<code>[↵]</code>ボタンをクリックすると、入力が確定して実行が続きます。</p>
 
   <h2>共有URL・QRコード</h2>
-  <p>「共有URL/QRコードを作成」で、今のソースコードをURLの<code>#</code>以降に埋め込んだリンクとQRコードを作成できます。そのURLを開くとソースコードが復元された状態で開きます。</p>
+  <p>「共有URL/QRコードを作成」で、今のソースコードと配列添字の開始番号の設定をURLの<code>#</code>以降に埋め込んだリンクとQRコードを作成できます。そのURLを開くとソースコードと添字設定の両方が復元された状態で開きます。</p>
 
   <a class="back" href="index.html">← DNCL2実行環境に戻る</a>
 </div>

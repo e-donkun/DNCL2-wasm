@@ -5,12 +5,18 @@ import { runProgram as interpretProgram, seedRandomState } from "./interpreter";
 import { hasError, errorMessage, resetError } from "./errors";
 import { hostError } from "./host";
 
-export function runProgram(src: string): void {
+// indexBase: 配列（・文字列）添字の開始番号。0または1（ホスト側のプルダウンで選択）
+// NOTE: デフォルト引数にすると、AssemblyScriptが生成するエクスポート関数が
+// __setArgumentsLength()を前提とするトランポリン形式になり、それを呼ばずに
+// 手書きグルーコード（dist/index.html。@assemblyscript/loaderを使わない）から
+// 直接呼ぶとWASMの引数取り違えでunreachableトラップになる。呼び出し側
+// （tests/run.mjs・build-html.mjs）は常に明示的に第2引数を渡す。
+export function runProgram(src: string, indexBase: i32): void {
   resetError();
   const tokens = tokenize(src);
   const stmts = parseProgram(tokens);
   if (!hasError) {
-    interpretProgram(stmts);
+    interpretProgram(stmts, indexBase);
   }
   if (hasError) {
     hostError(errorMessage);
